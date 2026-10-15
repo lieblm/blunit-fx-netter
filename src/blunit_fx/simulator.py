@@ -1,4 +1,4 @@
-"""Order generation and simulation runner for Blunit FX Internalizer."""
+"""Order generation and simulation runner for Blunit FX Netter."""
 
 import csv
 import random
@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Generator, List, Optional, Dict, Any, Union
 
 from .models import ClientOrder, OrderSide, ExecutionReport, HedgeTrade, TradeRecord
-from .engine import InternalizerEngine
+from .engine import NetterEngine, InternalizerEngine
 from .pricing import PricingModel
 from .data_loader import MarketCandle
+
 
 
 class OrderGenerator:
@@ -258,7 +259,7 @@ class SimulationRunner:
         sub_divider = "-" * 72
 
         print("\n" + divider)
-        print("          BLUNIT FX INTERNALIZER - SIMULATION REPORT")
+        print("             BLUNIT FX NETTER - SIMULATION REPORT")
         print(divider)
 
         if "period_start" in summary and "period_end" in summary:
@@ -282,12 +283,16 @@ class SimulationRunner:
         print(f"   Total Volume (EUR):     {summary['total_volume_eur']:,.2f} EUR")
         print(f"   Total Volume (CZK):     {summary['total_volume_czk']:,.2f} CZK")
 
-        print("\n [Internalization & Risk Management]")
+        netted_vol = summary.get("netted_volume_eur", summary.get("internalized_volume_eur", 0.0))
+        netting_rate = summary.get("netting_rate_pct", summary.get("internalization_rate_pct", 0.0))
+
+        print("\n [Netting & Risk Management]")
         print(f"   Hedge Operations:       {summary['hedge_count']:,} external market trade(s)")
         print(f"   Total Hedged Volume:    {summary['total_hedged_eur']:,.2f} EUR")
-        print(f"   Internalized Volume:    {summary['internalized_volume_eur']:,.2f} EUR")
-        print(f"   Internalization Rate:   {summary['internalization_rate_pct']:.2f}%")
+        print(f"   Netted Volume:          {netted_vol:,.2f} EUR")
+        print(f"   Netting Rate:           {netting_rate:.2f}%")
         print(f"   Final Net Open Pos (NOP): {summary['final_nop_eur']:,.2f} EUR")
+
 
         print("\n [Account Balances & Profitability]")
         print(f"   Ending EUR Balance:     {summary['final_balance_eur']:,.2f} EUR")

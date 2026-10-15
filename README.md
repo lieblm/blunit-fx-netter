@@ -1,10 +1,10 @@
-# Blunit FX Internalizer (PoC)
+# Blunit FX Netter (PoC)
 
-Proof of Concept (PoC) pro interní Market Maker engine směny měnového páru EUR/CZK.
+Proof of Concept (PoC) pro interní Netting & Market Maker engine směny měnového páru EUR/CZK.
 
-Systém demonstruje internalizaci klientských FX směn na sběrném účtu (omnibus account) bez nutnosti odesílat každý klientský pokyn na externí trh. Zisk tvoří vybraný spread z klientských transakcí. Tržní riziko je řízeno sledováním čisté otevřené pozice (**Net Open Position - NOP**) a automatickým zajišťováním (**Auto-Hedging**) na mezibankovním/externím trhu při dosažení stanoveného limitu.
+Systém demonstruje vnitřní netting a internalizaci klientských FX směn na sběrném účtu (omnibus account) bez nutnosti odesílat každý klientský pokyn na externí trh. Zisk tvoří vybraný spread z klientských transakcí. Tržní riziko je řízeno sledováním čisté otevřené pozice (**Net Open Position - NOP**) a automatickým zajišťováním (**Auto-Hedging**) na mezibankovním/externím trhu při dosažení stanoveného limitu.
 
-Systém podporuje jak rychlou syntetickou simulaci, tak **plný backtest na skutečných historických kurzech EUR/CZK** (např. 4hodinové svíčky H4) s možností volby počátku a konce testu a exportem výsledků do CSV.
+Systém podporuje jak rychlou syntetickou simulaci, tak **plný backtest na skutečných historických kurzech EUR/CZK** (4hodinové svíčky H4) s možností volby počátku a konce testu a exportem výsledků do CSV.
 
 ---
 
@@ -17,8 +17,8 @@ Systém podporuje jak rychlou syntetickou simulaci, tak **plný backtest na skut
    - Každý obchod se oceňuje podle aktuálního tržního kurzu dané svíčky v čase exekuce.
    - Klientský spread (`spread_pct`, výchozí 0.40 %, tj. půl-spread 0.20 % na každé straně).
    - Klient nakupuje EUR za Ask (`mid * (1 + spread/2)`), prodává EUR za Bid (`mid * (1 - spread/2)`).
-3. **Internalizace pokynů:**
-   - Klientské toky jsou uspokojovány ze sběrného účtu a přirozeně se nettingují.
+3. **Interní netting pokynů:**
+   - Klientské toky jsou uspokojovány ze sběrného účtu a přirozeně se vzájemně nettingují.
 4. **Auto-Hedging (Risk Management):**
    - Jakmile absolutní hodnota `|NOP| >= HEDGE_LIMIT` (výchozí 10 000 EUR), engine provede hedge obchod na externím trhu za aktuální tržní kurz dané svíčky, čímž vynuluje NOP na 0 EUR.
 5. **Detailní ledger & CSV export:**
@@ -33,6 +33,7 @@ Systém podporuje jak rychlou syntetickou simulaci, tak **plný backtest na skut
 blunit-fx-netter/
 ├── fxdata/
 │   ├── eurczk-h4-bid-2017-01-02-2026-10-15.csv  # Skutečná historická data EUR/CZK
+│   ├── backtest_2025.csv                         # Výsledky backtestu za rok 2025
 │   └── simulation_results.csv                    # Vygenerovaný detailní CSV výstup
 ├── src/
 │   └── blunit_fx/
@@ -40,19 +41,21 @@ blunit-fx-netter/
 │       ├── data_loader.py   # Načítání a filtrace historických svíček z CSV
 │       ├── models.py        # Datové třídy (ClientOrder, TradeRecord, HedgeTrade, AccountState)
 │       ├── pricing.py       # PricingModel (dynamické bid/ask kurzy a spread)
-│       ├── engine.py        # InternalizerEngine (omnibus účet, NOP, hedging, ledger)
+│       ├── engine.py        # NetterEngine (omnibus účet, NOP, hedging, ledger)
 │       └── simulator.py     # SimulationRunner s podporou historických svíček a CSV exportu
 ├── tests/
 │   ├── __init__.py
 │   └── test_engine.py       # Kompletní testovací sada (unittest)
 ├── scripts/
-│   └── build_h4_dataset.py  # Skript pro stažení/sestavení kompletního H4 datasetu
+│   ├── build_h4_dataset.py  # Skript pro stažení/sestavení kompletního H4 datasetu
+│   └── fetch_all_data.py    # Pomocný skript pro stahování dat
 ├── main.py                  # CLI vstupní bod simulátoru
 ├── pyproject.toml           # Konfigurace balíčku
 ├── requirements.txt         # Volitelné závislosti (pandas)
+├── MANAZERSKE_SHRNUTI.md    # Manažerské shrnutí srovnání 2023 vs 2025
 ├── .gitignore
 ├── GEMINI_ blunit-fx-netter.md # Směrnice asistenta
-├── zadanin-blunit-fx-netter.md  # Zadání PoC
+├── zadanin-blunit-fx-netter.md  # Původní zadání PoC
 └── README.md                # Tato dokumentace
 ```
 
@@ -79,7 +82,7 @@ python3 main.py --start-date 2024-01-01 --end-date 2024-01-31 --print-csv --csv-
 
 ### 3. Vlastní exportní soubor a parametry hedge limitu
 ```bash
-python3 main.py --start-date 2022-01-01 --end-date 2022-12-31 --hedge-limit 15000 --export-csv fxdata/backtest_2022.csv
+python3 main.py --start-date 2025-01-01 --end-date 2025-12-31 --hedge-limit 10000 --export-csv fxdata/backtest_2025.csv
 ```
 
 ---

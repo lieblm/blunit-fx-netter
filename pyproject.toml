@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "blunit-fx-netter"
 version = "0.1.0"
-description = "Blunit FX Internalizer - Proof of Concept for EUR/CZK Internal Market Maker"
+description = "Blunit FX Netter - Proof of Concept for EUR/CZK Internal Netting Engine"
 authors = [{ name = "Blunit Team" }]
 readme = "README.md"
 requires-python = ">=3.10"

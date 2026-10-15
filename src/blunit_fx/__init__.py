@@ -1,4 +1,4 @@
-"""Blunit FX Internalizer package."""
+"""Blunit FX Netter package."""
 
 from .models import (
     ClientOrder,
@@ -9,7 +9,7 @@ from .models import (
     TradeRecord,
 )
 from .pricing import PricingModel
-from .engine import InternalizerEngine
+from .engine import NetterEngine, InternalizerEngine
 from .simulator import OrderGenerator, SimulationRunner
 from .data_loader import MarketCandle, load_market_data
 
@@ -21,6 +21,7 @@ __all__ = [
     "AccountState",
     "TradeRecord",
     "PricingModel",
+    "NetterEngine",
     "InternalizerEngine",
     "OrderGenerator",
     "SimulationRunner",

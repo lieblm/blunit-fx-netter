@@ -1,4 +1,4 @@
-"""Internalizer engine implementation for Blunit FX."""
+"""Netter engine implementation for Blunit FX."""
 
 import csv
 from pathlib import Path
@@ -7,12 +7,12 @@ from .models import ClientOrder, ExecutionReport, HedgeTrade, OrderSide, Account
 from .pricing import PricingModel
 
 
-class InternalizerEngine:
+class NetterEngine:
     """
-    Core internalization and risk management engine for EUR/CZK.
+    Core netting and risk management engine for EUR/CZK.
     
-    Acts as an internal market maker:
-    - Internalizes client flows against the omnibus account.
+    Acts as an internal netter and market maker:
+    - Nets client flows against the omnibus account.
     - Charges bid/ask spread and accumulates spread revenue.
     - Tracks Net Open Position (NOP) in EUR.
     - Triggers auto-hedging against external market at current market rate when NOP limit is reached.
@@ -237,8 +237,8 @@ class InternalizerEngine:
         mtm_pnl_czk = self.account.mtm_pnl_czk(self.last_market_rate)
         mtm_pnl_eur = mtm_pnl_czk / self.last_market_rate if self.last_market_rate else 0.0
 
-        internalized_vol_eur = max(0.0, total_vol_eur - total_hedged_eur)
-        internalization_rate = (internalized_vol_eur / total_vol_eur * 100.0) if total_vol_eur > 0 else 0.0
+        netted_vol_eur = max(0.0, total_vol_eur - total_hedged_eur)
+        netting_rate = (netted_vol_eur / total_vol_eur * 100.0) if total_vol_eur > 0 else 0.0
 
         return {
             "total_orders": total_orders,
@@ -250,8 +250,11 @@ class InternalizerEngine:
             "sell_volume_eur": sell_vol_eur,
             "hedge_count": len(self.hedges),
             "total_hedged_eur": total_hedged_eur,
-            "internalized_volume_eur": internalized_vol_eur,
-            "internalization_rate_pct": internalization_rate,
+            "netted_volume_eur": netted_vol_eur,
+            "netting_rate_pct": netting_rate,
+            # Backwards compatibility aliases
+            "internalized_volume_eur": netted_vol_eur,
+            "internalization_rate_pct": netting_rate,
             "final_nop_eur": self.account.nop_eur,
             "final_balance_eur": self.account.balance_eur,
             "final_balance_czk": self.account.balance_czk,
@@ -263,3 +266,7 @@ class InternalizerEngine:
             "hedge_limit_eur": self.hedge_limit,
             "total_records": len(self.trade_log),
         }
+
+
+# Backwards compatibility alias
+InternalizerEngine = NetterEngine

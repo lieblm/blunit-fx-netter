@@ -1,4 +1,4 @@
-# Manažerské shrnutí: Blunit FX Internalizer
+# Manažerské shrnutí: Blunit FX Netter
 
 ---
 

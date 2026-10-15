@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Blunit FX Internalizer - Main Execution Script.
+Blunit FX Netter - Main Execution Script.
 
-Runs simulation of EUR/CZK internalization engine with real market rates
+Runs simulation of EUR/CZK netting engine with real market rates
 from historical data, start/end date range, auto-hedging, and CSV export.
 
 Usage:
@@ -21,7 +21,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from blunit_fx.pricing import PricingModel
-from blunit_fx.engine import InternalizerEngine
+from blunit_fx.engine import NetterEngine
 from blunit_fx.simulator import OrderGenerator, SimulationRunner
 from blunit_fx.data_loader import load_market_data
 
@@ -52,9 +52,10 @@ def parse_date(date_str: Optional[str]) -> Optional[datetime]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Blunit FX Internalizer - Backtest & Simulation on Real FX Data",
+        description="Blunit FX Netter - Backtest & Simulation on Real FX Data",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+
     parser.add_argument(
         "--data-file",
         type=str,
@@ -143,7 +144,7 @@ def main() -> None:
 
         initial_mid = candles[0].mid_price
         pricing = PricingModel(mid_rate=initial_mid, spread_pct=args.spread)
-        engine = InternalizerEngine(pricing_model=pricing, hedge_limit=args.hedge_limit)
+        engine = NetterEngine(pricing_model=pricing, hedge_limit=args.hedge_limit)
         runner = SimulationRunner(engine=engine)
 
         summary = runner.run_historical(
@@ -155,12 +156,13 @@ def main() -> None:
     else:
         # Fallback to synthetic mode if CSV not provided
         pricing = PricingModel(mid_rate=24.50, spread_pct=args.spread)
-        engine = InternalizerEngine(pricing_model=pricing, hedge_limit=args.hedge_limit)
+        engine = NetterEngine(pricing_model=pricing, hedge_limit=args.hedge_limit)
         generator = OrderGenerator(seed=args.seed)
         runner = SimulationRunner(engine=engine)
 
         orders = generator.generate_orders(count=100)
         summary = runner.run(orders=orders, verbose=args.verbose)
+
 
     # 2. Export trades, balances, and running PnL to CSV
     if args.export_csv:

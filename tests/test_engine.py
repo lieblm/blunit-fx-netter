@@ -7,9 +7,10 @@ from pathlib import Path
 
 from blunit_fx.models import OrderSide, ClientOrder, TradeRecord
 from blunit_fx.pricing import PricingModel
-from blunit_fx.engine import InternalizerEngine
+from blunit_fx.engine import NetterEngine, InternalizerEngine
 from blunit_fx.simulator import OrderGenerator, SimulationRunner
 from blunit_fx.data_loader import MarketCandle, load_market_data
+
 
 
 class TestPricingModel(unittest.TestCase):

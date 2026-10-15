@@ -1,0 +1,3 @@
+# Core PoC runs with standard library (Python >= 3.10)
+# Optional dependencies:
+pandas>=2.0.0

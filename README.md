@@ -55,8 +55,8 @@ blunit-fx-netter/
 ├── MANAZERSKE_SHRNUTI.md    # Manažerské shrnutí srovnání 2023 vs 2025
 ├── .gitignore
 ├── GEMINI_ blunit-fx-netter.md # Směrnice asistenta
-├── zadanin-blunit-fx-netter.md  # Původní zadání PoC
 └── README.md                # Tato dokumentace
+
 ```
 
 ---

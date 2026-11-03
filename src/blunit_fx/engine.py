@@ -16,16 +16,19 @@ class NetterEngine:
     - Charges bid/ask spread and accumulates spread revenue.
     - Tracks Net Open Position (NOP) in EUR.
     - Triggers auto-hedging against external market at current market rate when NOP limit is reached.
+    - Supports full hedging (reset to 0) or partial hedging (reduction to target buffer ratio).
     - Maintains a complete chronological ledger (trade_log) for audit and CSV export.
     """
 
     def __init__(
         self,
         pricing_model: Optional[PricingModel] = None,
-        hedge_limit: float = 10_000.0,
+        hedge_limit: float = 25_000.0,
+        hedge_target_ratio: float = 0.0,
     ) -> None:
-        self.pricing_model: PricingModel = pricing_model or PricingModel()
+        self.pricing_model: PricingModel = pricing_model or PricingModel(hedge_limit=hedge_limit)
         self.hedge_limit: float = hedge_limit
+        self.hedge_target_ratio: float = max(0.0, min(0.9, hedge_target_ratio))
         self.account: AccountState = AccountState()
         self.executions: List[ExecutionReport] = []
         self.hedges: List[HedgeTrade] = []
@@ -56,9 +59,18 @@ class NetterEngine:
         mid_rate = current_market_rate if current_market_rate is not None else self.pricing_model.mid_rate
         self.last_market_rate = mid_rate
 
-        rate = self.pricing_model.get_client_rate(order.side, mid_rate=mid_rate)
+        rate = self.pricing_model.get_client_rate(
+            side=order.side,
+            mid_rate=mid_rate,
+            current_nop=self.account.nop_eur,
+        )
         volume_czk = order.volume_eur * rate
-        spread_profit = self.pricing_model.calculate_spread_profit(order.volume_eur, mid_rate=mid_rate)
+        spread_profit = self.pricing_model.calculate_spread_profit(
+            volume_eur=order.volume_eur,
+            side=order.side,
+            mid_rate=mid_rate,
+            current_nop=self.account.nop_eur,
+        )
 
         # Update omnibus balances according to client flow
         if order.side == OrderSide.BUY:
@@ -118,11 +130,19 @@ class NetterEngine:
 
     def _execute_hedge(self, timestamp, market_rate: Optional[float] = None) -> HedgeTrade:
         """
-        Execute an external market hedge trade at market rate to reset NOP to zero.
+        Execute an external market hedge trade at market rate.
+        If hedge_target_ratio is 0.0, resets NOP to 0.
+        If hedge_target_ratio > 0.0, brings NOP down to hedge_limit * hedge_target_ratio.
         """
         self._hedge_sequence += 1
         nop_before = self.account.nop_eur
-        hedge_volume = abs(nop_before)
+
+        target_nop_mag = self.hedge_limit * self.hedge_target_ratio
+        target_nop = target_nop_mag if nop_before > 0 else -target_nop_mag
+        hedge_volume = abs(nop_before) - abs(target_nop)
+        if hedge_volume <= 0:
+            hedge_volume = abs(nop_before)
+
         mid_rate = market_rate if market_rate is not None else self.last_market_rate
 
         if nop_before > 0:
@@ -264,6 +284,8 @@ class NetterEngine:
             "mid_rate": self.last_market_rate,
             "spread_pct": self.pricing_model.spread_pct,
             "hedge_limit_eur": self.hedge_limit,
+            "hedge_target_ratio": self.hedge_target_ratio,
+            "skew_factor": self.pricing_model.skew_factor,
             "total_records": len(self.trade_log),
         }
 

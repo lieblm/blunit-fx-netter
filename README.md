@@ -88,8 +88,12 @@ streamlit run app.py
 Dashboard nabízí:
 - Volbu časového intervalu (přednastaveno na rok 2025 nebo 2023, případně vlastní rozsah).
 - Dynamickou úpravu spreadu, limitu NOP a frekvence klientských pokynů.
+- **Risk Cockpit & Semafor řízení rizik:** Třízónové řízení expozice (Zelená / Žlutá / Červená zóna) dle Basel III standardů.
+- **Kvantitativní metriky tržního rizika:** Denní Value at Risk (VaR 95 % a VaR 99 %) a 10letý stresový test (max historický šok).
+- **Cenové vychylování (Inventory Skewing):** Algoritmické posouvání klientských kurzů podle stavu sběrného účtu pro přirozený rebalancing.
+- **Částečný hedging:** Možnost volby mezi kompletním vynulováním (0 EUR) a částečným dorovnáním (50 % limitu) pro zachování nettingové kapacity.
 - Okamžitý přepočet KPI (obrat, míra internalizace, čistý MtM zisk, počet hedgů).
-- Interaktivní grafy kumulativního zisku a křivky NOP s vyznačenými zásahy externího trhu.
+- Interaktivní grafy kumulativního zisku a křivky NOP s vyznačenými zónami a zásahy externího trhu.
 - Filtrovatelný ledger transakcí a tlačítko pro stažení výsledného CSV.
 
 ---
@@ -101,14 +105,14 @@ Dashboard nabízí:
 python3 main.py --start-date 2023-01-01 --end-date 2023-12-31
 ```
 
-### 2. Spuštění s výpisem jednotlivých obchodů a zůstatků do formátu CSV
+### 2. Spuštění s optimalizovaným škálováním (25 000 EUR limit, částečný hedge a skewing)
 ```bash
-python3 main.py --start-date 2024-01-01 --end-date 2024-01-31 --print-csv --csv-limit 30
+python3 main.py --start-date 2025-01-01 --end-date 2025-12-31 --hedge-limit 25000 --hedge-target-ratio 0.5 --skew-factor 0.0005
 ```
 
-### 3. Vlastní exportní soubor a parametry hedge limitu
+### 3. Spuštění s výpisem jednotlivých obchodů a zůstatků do formátu CSV
 ```bash
-python3 main.py --start-date 2025-01-01 --end-date 2025-12-31 --hedge-limit 10000 --export-csv fxdata/backtest_2025.csv
+python3 main.py --start-date 2024-01-01 --end-date 2024-01-31 --print-csv --csv-limit 30
 ```
 
 ---
@@ -122,7 +126,9 @@ python3 main.py --start-date 2025-01-01 --end-date 2025-12-31 --hedge-limit 1000
 | `--end-date` | `None` (celé období) | **Konec testu** (např. `2023-12-31`) |
 | `--orders-per-candle` | `1` | Počet generovaných klientských objednávek na jednu svíčku |
 | `--spread` | `0.004` | Klientský spread (0.004 = 0.40 %, půl-spread 0.20 %) |
-| `--hedge-limit` | `10000.0` | Limit NOP v EUR pro spuštění auto-hedgingu |
+| `--hedge-limit` | `25000.0` | Limit NOP v EUR pro spuštění auto-hedgingu |
+| `--hedge-target-ratio` | `0.5` | Cílový poměr rezervy po hedgi (0.0 = reset na 0 EUR, 0.5 = redukce na 50 % limitu) |
+| `--skew-factor` | `0.0005` | Intenzita cenového vychylování inventáře (5 bps při 100 % limitu) |
 | `--export-csv` | `fxdata/simulation_results.csv` | Cesta pro uložení kompletního CSV výstupu |
 | `--print-csv` | `False` | Vypíše CSV výstup přímo do konzole |
 | `--csv-limit` | `None` (vše) | Maximální počet řádků vypsaných do konzole při `--print-csv` |

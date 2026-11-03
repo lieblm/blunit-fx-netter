@@ -8,7 +8,7 @@ from .models import (
     AccountState,
     TradeRecord,
 )
-from .pricing import PricingModel
+from .pricing import PricingModel, InventorySkewPricingModel
 from .engine import NetterEngine, InternalizerEngine
 from .simulator import OrderGenerator, SimulationRunner
 from .data_loader import MarketCandle, load_market_data
@@ -21,6 +21,7 @@ __all__ = [
     "AccountState",
     "TradeRecord",
     "PricingModel",
+    "InventorySkewPricingModel",
     "NetterEngine",
     "InternalizerEngine",
     "OrderGenerator",

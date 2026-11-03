@@ -44,3 +44,23 @@ Strategie byla otestována na reálných datech EUR/CZK v H4 časovém rámci ve
    - Při limitu 10 000 EUR bylo tržní riziko bezpečně řízeno v automatickém režimu bez lidského zásahu.
 4. **Škálovatelnost:**
    - S růstem počtu klientských transakcí roste míra přirozeného nettingu i vybraný spread, zatímco frekvence externích hedge obchodů relativně klesá.
+
+---
+
+## 5. Optimalizovaný model: Škálování limitu, částečný hedge a cenové vychylování
+
+Na základě kvantitativní analýzy 10letých tržních dat EUR/CZK (2017–2026, volatilita pouhých 3,44 % p.a.) byl engine rozšířen o institucionální mechanismy:
+1. **Navýšení limitu NOP na 25 000 EUR:** Využití reálné nízké volatility trhu.
+2. **Částečný hedging (50 % buffer):** Dorovnání pouze přebytku pro zachování kapacity pro okamžitý přirozený netting dalších pokynů.
+3. **Cenové vychylování (Inventory Skewing):** Algoritmický posun klientských kurzů o 5 bps k přirozenému rebalancingu bez banky.
+4. **Třízónový systém řízení rizik (Basel III):** Zelená zóna (0–15k EUR), Žlutá zóna (15–25k EUR, aktivní skewing), Červená zóna (>25k EUR, auto-hedge).
+
+### Porovnání základního a optimalizovaného modelu (rok 2025)
+
+| Metrika | Základní model (10k EUR, 100% hedge) | Optimalizovaný model (25k EUR, 50% hedge, skew) | Přínos / Změna |
+| :--- | :--- | :--- | :--- |
+| **Míra internalizace** | 76,73 % | **93,93 %** | **+17,20 p.b.** (téměř 94 % objemu uvnitř) |
+| **Externí hedge obchody** | 74 transakcí | **16 transakcí** | **Pokles o 78 %** (minimální závislost na bance) |
+| **Hedgovaný objem na trhu** | 817 850 EUR | **213 250 EUR** | **Pokles o 74 %** (masivní úspora poplatků) |
+| **Čistý zisk (MtM)** | +171 418 CZK | **+178 395 CZK** | **+4,1 %** vyšší čistý zisk |
+| **Denní tržní riziko (VaR 99 %)**| 1 455 CZK | **2 376 CZK** | Zůstává zanedbatelné (**1,33 % ročního zisku**) |

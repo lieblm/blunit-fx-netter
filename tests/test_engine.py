@@ -42,6 +42,26 @@ class TestPricingModel(unittest.TestCase):
         profit = self.pricing.calculate_spread_profit(volume)
         self.assertAlmostEqual(profit, 49.0, places=4)
 
+    def test_inventory_skew(self):
+        skew_pricing = PricingModel(
+            mid_rate=25.00,
+            spread_pct=0.004,
+            skew_factor=0.0010,  # 10 bps max skew
+            hedge_limit=10_000.0,
+        )
+        # Unskewed mid = 25.00
+        # When NOP = +10_000 (long EUR), skewed mid = 25.00 * (1 - 0.0010) = 24.975
+        skewed_mid_long = skew_pricing.get_skewed_mid(mid_rate=25.00, current_nop=10_000.0)
+        self.assertAlmostEqual(skewed_mid_long, 24.975, places=4)
+
+        # Client buy rate when long EUR should be cheaper (attractive for buyer)
+        buy_rate = skew_pricing.get_client_rate(OrderSide.BUY, mid_rate=25.00, current_nop=10_000.0)
+        self.assertAlmostEqual(buy_rate, 24.975 * 1.002, places=4)
+
+        # When NOP = -10_000 (short EUR), skewed mid = 25.00 * (1 + 0.0010) = 25.025
+        skewed_mid_short = skew_pricing.get_skewed_mid(mid_rate=25.00, current_nop=-10_000.0)
+        self.assertAlmostEqual(skewed_mid_short, 25.025, places=4)
+
 
 class TestInternalizerEngine(unittest.TestCase):
     def setUp(self):
@@ -106,6 +126,27 @@ class TestInternalizerEngine(unittest.TestCase):
         self.assertEqual(hedge_rec.event_type, "HEDGE")
         self.assertAlmostEqual(hedge_rec.nop_eur, 0.0)
         self.assertAlmostEqual(hedge_rec.running_pnl_czk, 588.0, places=4)
+
+    def test_partial_auto_hedge(self):
+        partial_engine = InternalizerEngine(
+            pricing_model=self.pricing,
+            hedge_limit=10_000.0,
+            hedge_target_ratio=0.5,  # hedge down to 5 000 EUR
+        )
+        order = ClientOrder(
+            order_id="ORD-PARTIAL",
+            timestamp=datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            side=OrderSide.BUY,
+            volume_eur=12_000.0,
+        )
+        _, hedge = partial_engine.process_order(order, current_market_rate=24.50)
+
+        self.assertIsNotNone(hedge)
+        self.assertEqual(hedge.side, OrderSide.BUY)
+        # 12 000 EUR short -> hedged 7 000 EUR -> remaining NOP is -5 000 EUR (50% of limit)
+        self.assertAlmostEqual(hedge.volume_eur, 7_000.0)
+        self.assertAlmostEqual(partial_engine.nop_eur, -5_000.0)
+        self.assertAlmostEqual(hedge.nop_after_eur, -5_000.0)
 
     def test_csv_export(self):
         order = ClientOrder(

@@ -89,8 +89,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--hedge-limit",
         type=float,
-        default=10_000.0,
+        default=25_000.0,
         help="Net Open Position (NOP) threshold in EUR that triggers auto-hedging",
+    )
+    parser.add_argument(
+        "--hedge-target-ratio",
+        type=float,
+        default=0.5,
+        help="Target buffer ratio to retain after hedge (0.0 = full reset to 0, 0.5 = partial hedge to 50%%)",
+    )
+    parser.add_argument(
+        "--skew-factor",
+        type=float,
+        default=0.0005,
+        help="Inventory skew intensity (0.0005 = 5 bps max skew for price shade)",
     )
     parser.add_argument(
         "--export-csv",
@@ -143,8 +155,17 @@ def main() -> None:
             sys.exit(1)
 
         initial_mid = candles[0].mid_price
-        pricing = PricingModel(mid_rate=initial_mid, spread_pct=args.spread)
-        engine = NetterEngine(pricing_model=pricing, hedge_limit=args.hedge_limit)
+        pricing = PricingModel(
+            mid_rate=initial_mid,
+            spread_pct=args.spread,
+            skew_factor=args.skew_factor,
+            hedge_limit=args.hedge_limit,
+        )
+        engine = NetterEngine(
+            pricing_model=pricing,
+            hedge_limit=args.hedge_limit,
+            hedge_target_ratio=args.hedge_target_ratio,
+        )
         runner = SimulationRunner(engine=engine)
 
         summary = runner.run_historical(
@@ -155,8 +176,17 @@ def main() -> None:
         )
     else:
         # Fallback to synthetic mode if CSV not provided
-        pricing = PricingModel(mid_rate=24.50, spread_pct=args.spread)
-        engine = NetterEngine(pricing_model=pricing, hedge_limit=args.hedge_limit)
+        pricing = PricingModel(
+            mid_rate=24.50,
+            spread_pct=args.spread,
+            skew_factor=args.skew_factor,
+            hedge_limit=args.hedge_limit,
+        )
+        engine = NetterEngine(
+            pricing_model=pricing,
+            hedge_limit=args.hedge_limit,
+            hedge_target_ratio=args.hedge_target_ratio,
+        )
         generator = OrderGenerator(seed=args.seed)
         runner = SimulationRunner(engine=engine)
 

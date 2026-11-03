@@ -105,6 +105,29 @@ def parse_args() -> argparse.Namespace:
         help="Inventory skew intensity (0.0005 = 5 bps max skew for price shade)",
     )
     parser.add_argument(
+        "--opportunistic-hedge",
+        action="store_true",
+        help="Enable opportunistic market-timed hedging before reaching hard limit",
+    )
+    parser.add_argument(
+        "--opportunistic-threshold",
+        type=float,
+        default=17_500.0,
+        help="Minimum NOP magnitude in EUR to qualify for opportunistic timing",
+    )
+    parser.add_argument(
+        "--timing-window",
+        type=int,
+        default=20,
+        help="Rolling window of market rates for timing calculation",
+    )
+    parser.add_argument(
+        "--timing-k",
+        type=float,
+        default=0.75,
+        help="Standard deviation multiplier for timing trigger",
+    )
+    parser.add_argument(
         "--export-csv",
         type=str,
         default="fxdata/simulation_results.csv",
@@ -165,6 +188,10 @@ def main() -> None:
             pricing_model=pricing,
             hedge_limit=args.hedge_limit,
             hedge_target_ratio=args.hedge_target_ratio,
+            enable_opportunistic_hedge=args.opportunistic_hedge,
+            opportunistic_threshold=args.opportunistic_threshold,
+            timing_window=args.timing_window,
+            timing_k=args.timing_k,
         )
         runner = SimulationRunner(engine=engine)
 
@@ -186,6 +213,10 @@ def main() -> None:
             pricing_model=pricing,
             hedge_limit=args.hedge_limit,
             hedge_target_ratio=args.hedge_target_ratio,
+            enable_opportunistic_hedge=args.opportunistic_hedge,
+            opportunistic_threshold=args.opportunistic_threshold,
+            timing_window=args.timing_window,
+            timing_k=args.timing_k,
         )
         generator = OrderGenerator(seed=args.seed)
         runner = SimulationRunner(engine=engine)

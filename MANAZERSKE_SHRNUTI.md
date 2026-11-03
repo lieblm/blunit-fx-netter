@@ -14,7 +14,7 @@ Místo posílání každé klientské směny na externí trh (do banky) funguje 
 ## 2. Kde je riziko a jak ho řídíme (Auto-Hedging)
 
 - **Riziko nerovnováhy:** Pokud klienti v daný moment více nakupují než prodávají, vzniká na sběrném účtu otevřená pozice (**NOP - Net Open Position**). Kdyby v tu chvíli tržní kurz prudce vyskočil, vznikla by tržní ztráta.
-- **Automatická pojistka:** Systém neustále hlídá limit rizika (výchozí **10 000 EUR**). Jakmile je limit překročen, systém přebytek okamžitě dorovná na externím trhu za velkoobchodní kurz. Tím tržní riziko okamžitě **vynuluje na 0**.
+- **Automatická pojistka:** Systém neustále hlídá limit rizika (výchozí **10 000 EUR** v základním modelu, škálovatelný na **25 000 EUR**). Jakmile je limit překročen, systém přebytek okamžitě dorovná na externím trhu za velkoobchodní kurz. Tím tržní riziko okamžitě **vynuluje nebo zredukuje na bezpečnou rezervu**.
 
 ---
 
@@ -47,10 +47,10 @@ Strategie byla otestována na reálných datech EUR/CZK v H4 časovém rámci ve
 
 ---
 
-## 5. Optimalizovaný model: Škálování limitu, částečný hedge a cenové vychylování
+## 5. Optimalizovaný model: Škálování limitu a cenové vychylování
 
-Na základě kvantitativní analýzy 10letých tržních dat EUR/CZK (2017–2026, volatilita pouhých 3,44 % p.a.) byl engine rozšířen o institucionální mechanismy:
-1. **Navýšení limitu NOP na 25 000 EUR:** Využití reálné nízké volatility trhu.
+Na základě kvantitativní analýzy 10letých tržních dat EUR/CZK (2017–2026, historická volatilita pouhých 3,44 % p.a.) byl engine rozšířen o institucionální mechanismy:
+1. **Navýšení limitu NOP na 25 000 EUR:** Využití přirozeně nízké volatility trhu.
 2. **Částečný hedging (50 % buffer):** Dorovnání pouze přebytku pro zachování kapacity pro okamžitý přirozený netting dalších pokynů.
 3. **Cenové vychylování (Inventory Skewing):** Algoritmický posun klientských kurzů o 5 bps k přirozenému rebalancingu bez banky.
 4. **Třízónový systém řízení rizik (Basel III):** Zelená zóna (0–15k EUR), Žlutá zóna (15–25k EUR, aktivní skewing), Červená zóna (>25k EUR, auto-hedge).
@@ -64,3 +64,36 @@ Na základě kvantitativní analýzy 10letých tržních dat EUR/CZK (2017–202
 | **Hedgovaný objem na trhu** | 817 850 EUR | **213 250 EUR** | **Pokles o 74 %** (masivní úspora poplatků) |
 | **Čistý zisk (MtM)** | +171 418 CZK | **+178 395 CZK** | **+4,1 %** vyšší čistý zisk |
 | **Denní tržní riziko (VaR 99 %)**| 1 455 CZK | **2 376 CZK** | Zůstává zanedbatelné (**1,33 % ročního zisku**) |
+
+---
+
+## 6. Oportunistický hedging: Inteligentní časování zajišťovacích obchodů
+
+### Princip metody (jednoduše a srozumitelně)
+Při klasickém hedgingu systém čeká, až otevřená pozice narazí na havarijní strop (např. 25 000 EUR), a v ten moment musí nuceně prodat nebo koupit v bance za jakýkoliv kurz, který zrovna na trhu platí.
+
+**Oportunistický hedging funguje chytřeji:**
+* Pokud na účtu vznikne větší přebytek (nad 17 500 EUR), systém **nečeká pasivně na strop**.
+* Průběžně sleduje krátkodobé tržní kmitání a vyčkává na okamžik, kdy se kurz pohne **výrazně v náš prospěch**.
+* Jakmile trh nabídne nadprůměrný kurz, systém přebytek odprodá dříve a realizuje **dodatečný tržní zisk k vybranému spreadu**.
+
+### Použité indikátory a směrová pravidla
+Využívá se statistické pásmo odchylky od klouzavého průměru (Bollingerovo pásmo s parametrem $k = 0{,}75 \times \sigma$ za posledních 20 svíček H4, tj. cca 3,3 dne):
+
+1. **Účet drží přebytek EUR ($+NOP \ge 17\,500\ \text{EUR}$):**
+   * *Cíl:* Prodat EUR v bance co nejdráže.
+   * *Pravidlo:* Systém čeká na cenovou špičku ($Aktuální\ kurz \ge Průměr + 0{,}75 \times \sigma$). Jakmile nastane, odprodá EUR na trhu za prémiový kurz.
+2. **Účet má nedostatek EUR ($-NOP \le -17\,500\ \text{EUR}$):**
+   * *Cíl:* Dokoupit EUR v bance co nejlevněji.
+   * *Pravidlo:* Systém čeká na cenový propad ($Aktuální\ kurz \le Průměr - 0{,}75 \times \sigma$). Jakmile nastane, dokoupí EUR v propadu.
+3. **Pojistka (Hard Stop na 25 000 EUR):**
+   * Pokud trh prudce trenduje proti nám a lokální extrém nenastane, při dosažení 25 000 EUR se provede okamžitý havarijní hedge bez ohledu na kurz.
+
+### Výsledky backtestu (rok 2025)
+
+* **Celkový počet hedge obchodů:** 28 transakcí.
+* **Oportunistické obchody (za prémiový kurz):** **21 transakcí (75 % všech zásahů)**.
+* **Havarijní obchody (Hard Stop):** pouze 7 transakcí.
+* **Míra internalizace:** **93,50 %**.
+* **Čistý zisk (Mark-to-Market):** **+178 060 CZK**.
+* **Manažerský závěr:** Tři čtvrtiny všech externích zásahů byly provedeny z vlastní iniciativy za zvýhodněný tržní kurz, nikoliv z nuceného překročení limitu.

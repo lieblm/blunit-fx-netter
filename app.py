@@ -4,7 +4,8 @@ Blunit FX Netter - Interactive Web Dashboard & Simulator.
 
 Built with Streamlit and Plotly for real-time visualization of
 internal FX netting, risk limits, auto-hedging, and profitability.
-Features institutional risk management (VaR, three-zone limits, inventory skewing).
+Features institutional risk management (VaR, three-zone limits, inventory skewing,
+and opportunistic market-timed hedging).
 """
 
 import sys
@@ -145,7 +146,7 @@ hedge_limit_input = st.sidebar.number_input(
     max_value=200000.0,
     value=25000.0,
     step=2500.0,
-    help="Prahová hodnota otevřené pozice pro spuštění auto-hedgingu (doporučeno 25 000 EUR dle citlivostní analýzy)",
+    help="Prahová hodnota otevřené pozice pro spuštění havarijního auto-hedgingu",
 )
 
 hedge_mode_choice = st.sidebar.selectbox(
@@ -158,6 +159,34 @@ hedge_mode_choice = st.sidebar.selectbox(
     help="Částečné dorovnání ponechává rezervu pro okamžitý přirozený netting dalších protichůdných pokynů.",
 )
 hedge_target_ratio_val = 0.5 if "50 %" in hedge_mode_choice else 0.0
+
+st.sidebar.subheader("Oportunistický hedging (Časování)")
+enable_opp_hedge = st.sidebar.checkbox(
+    "Aktivovat oportunistický hedging",
+    value=True,
+    help="Vybírá výhodný tržní kurz pro odprodej/dokup přebytku v Zóně 2 dříve, než pozice narazí na havarijní limit.",
+)
+
+if enable_opp_hedge:
+    opp_threshold_input = st.sidebar.slider(
+        "Prahová hodnota pro časování (EUR)",
+        min_value=5000.0,
+        max_value=hedge_limit_input,
+        value=min(17500.0, hedge_limit_input * 0.8),
+        step=2500.0,
+        help="Minimální otevřená pozice (NOP), při které se začíná vyhodnocovat příznivý kurz pro odbourání inventáře",
+    )
+    timing_k_input = st.sidebar.slider(
+        "Citlivost odchylky kurzu (k * sigma)",
+        min_value=0.25,
+        max_value=2.0,
+        value=0.75,
+        step=0.25,
+        help="Požadovaná odchylka od klouzavého průměru (0.75 = střední citlivost)",
+    )
+else:
+    opp_threshold_input = 17500.0
+    timing_k_input = 0.75
 
 st.sidebar.subheader("Cenotvorba & Vychylování")
 spread_pct_input = st.sidebar.slider(
@@ -211,7 +240,7 @@ run_button = st.sidebar.button("Spustit simulaci", type="primary", use_container
 # --- Main Application Header ---
 st.title("Blunit FX Netter - Dashboard")
 st.caption(
-    "Interní netting engine s dynamickým řízením tržního rizika a škálováním pro měnový pár EUR/CZK."
+    "Interní netting engine s oportunistickým hedgingem, řízením tržního rizika a škálováním pro pár EUR/CZK."
 )
 
 # Convert dates to UTC datetimes
@@ -242,6 +271,10 @@ engine = NetterEngine(
     pricing_model=pricing,
     hedge_limit=hedge_limit_input,
     hedge_target_ratio=hedge_target_ratio_val,
+    enable_opportunistic_hedge=enable_opp_hedge,
+    opportunistic_threshold=opp_threshold_input,
+    timing_window=20,
+    timing_k=timing_k_input,
 )
 runner = SimulationRunner(engine=engine)
 
@@ -258,6 +291,7 @@ df_records = pd.DataFrame([
         "trade_id": r.trade_id,
         "timestamp": r.timestamp,
         "event_type": r.event_type,
+        "event_subtype": getattr(r, "event_subtype", ""),
         "side": r.side.value,
         "volume_eur": r.volume_eur,
         "execution_rate": r.execution_rate,
@@ -279,6 +313,8 @@ col1, col2, col3, col4 = st.columns(4)
 
 netted_vol = summary.get("netted_volume_eur", summary.get("internalized_volume_eur", 0.0))
 netting_rate = summary.get("netting_rate_pct", summary.get("internalization_rate_pct", 0.0))
+opp_hedges_cnt = summary.get("opportunistic_hedge_count", 0)
+hard_hedges_cnt = summary.get("hard_hedge_count", summary["hedge_count"])
 
 with col1:
     st.markdown(
@@ -320,12 +356,17 @@ max_abs_nop = df_records["nop_eur"].abs().max() if not df_records.empty else 0.0
 limit_utilization = (max_abs_nop / hedge_limit_input) * 100 if hedge_limit_input > 0 else 0
 
 with col4:
+    hedge_subtext = (
+        f"Oportunistické: {opp_hedges_cnt} | Hard stop: {hard_hedges_cnt}"
+        if opp_hedges_cnt > 0
+        else f"Hedgováno {summary['total_hedged_eur']:,.0f} EUR"
+    )
     st.markdown(
         f"""
         <div class="metric-card">
             <div class="metric-title">Externí zajištění (Hedge)</div>
             <div class="metric-value">{summary['hedge_count']} operací</div>
-            <div class="metric-subtitle">Hedgováno {summary['total_hedged_eur']:,.0f} EUR ({summary['hedge_count']/summary['total_orders']*100:.1f} % pokynů)</div>
+            <div class="metric-subtitle">{hedge_subtext}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -337,7 +378,6 @@ st.write("")
 # --- Institutional Risk Cockpit: Value at Risk & Three-Zone Traffic Light ---
 st.subheader("Řízení rizik a kapitálová přiměřenost (Risk Cockpit)")
 
-# Calculate real quantitative risk metrics (historical daily std = 0.2165% for EUR/CZK)
 daily_sigma = 0.002165
 ref_rate = summary.get("mid_rate", 25.0)
 
@@ -345,10 +385,6 @@ var95_czk = max_abs_nop * ref_rate * 1.645 * daily_sigma
 var99_czk = max_abs_nop * ref_rate * 2.326 * daily_sigma
 max_historical_shock_czk = max_abs_nop * ref_rate * 0.01823  # 10Y max drop: 1.823%
 
-# Determine Traffic Light Zone
-# Green: <= 60% of limit
-# Yellow: 60% - 100% of limit
-# Red: >= 100% (triggers hedge)
 zone_threshold_green = hedge_limit_input * 0.60
 zone_threshold_yellow = hedge_limit_input * 1.00
 
@@ -359,11 +395,11 @@ if max_abs_nop <= zone_threshold_green:
 elif max_abs_nop <= zone_threshold_yellow:
     current_zone = "ŽLUTÁ ZÓNA (60 – 100 % limitu)"
     zone_class = "zone-yellow"
-    zone_desc = "Zvýšená otevřená pozice. Aktivní cenové vychylování (skewing) k přirozenému rebalancingu."
+    zone_desc = "Zvýšená otevřená pozice. Aktivní cenové vychylování a oportunistický hedging."
 else:
     current_zone = "ČERVENÁ ZÓNA (>= 100 % limitu)"
     zone_class = "zone-red"
-    zone_desc = "Dosažen limit rizika. Automatický auto-hedge přebytku na externím trhu."
+    zone_desc = "Dosažen limit rizika. Proveden havarijní auto-hedge na externím trhu."
 
 col_r1, col_r2, col_r3 = st.columns([1.2, 1.4, 1.4])
 
@@ -407,7 +443,6 @@ with col_r3:
         unsafe_allow_html=True,
     )
 
-# Visual progress bar with zones
 st.markdown(
     f"**Vytížení limitu NOP:** Maximální pozice **{max_abs_nop:,.0f} EUR** z limitu **{hedge_limit_input:,.0f} EUR** ({limit_utilization:.1f} %)."
 )
@@ -464,7 +499,7 @@ with tab_nop:
         y1=hedge_limit_input,
         fillcolor="rgba(234, 179, 8, 0.12)",
         line_width=0,
-        annotation_text="Žlutá zóna (Rebalancing & Skewing)",
+        annotation_text="Žlutá zóna (Rebalancing & Oportunistický hedge)",
         annotation_position="inside top left",
     )
     fig_nop.add_hrect(
@@ -486,18 +521,49 @@ with tab_nop:
         )
     )
 
-    # Hedge events
-    hedge_rows = df_records[df_records["event_type"] == "HEDGE"]
-    if not hedge_rows.empty:
+    # Opportunistic Hedge events
+    opp_hedge_rows = df_records[(df_records["event_type"] == "HEDGE") & (df_records["event_subtype"] == "OPPORTUNISTIC")]
+    if not opp_hedge_rows.empty:
         fig_nop.add_trace(
             go.Scatter(
-                x=hedge_rows["timestamp"],
-                y=hedge_rows["nop_eur"],
+                x=opp_hedge_rows["timestamp"],
+                y=opp_hedge_rows["nop_eur"],
                 mode="markers",
-                name="Auto-Hedge v bance",
-                marker=dict(color="#dc2626", size=9, symbol="diamond"),
-                hovertemplate="%{x}<br>Auto-Hedge na cílovou pozici: %{y:,.2f} EUR<extra></extra>",
+                name="Oportunistický hedge (Časování trhem)",
+                marker=dict(color="#f59e0b", size=9, symbol="star"),
+                hovertemplate="%{x}<br>Oportunistický hedge: %{y:,.2f} EUR<extra></extra>",
             )
+        )
+
+    # Hard Stop Hedge events
+    hard_hedge_rows = df_records[(df_records["event_type"] == "HEDGE") & (df_records["event_subtype"] != "OPPORTUNISTIC")]
+    if not hard_hedge_rows.empty:
+        fig_nop.add_trace(
+            go.Scatter(
+                x=hard_hedge_rows["timestamp"],
+                y=hard_hedge_rows["nop_eur"],
+                mode="markers",
+                name="Havarijní hedge (Hard Stop)",
+                marker=dict(color="#dc2626", size=9, symbol="diamond"),
+                hovertemplate="%{x}<br>Havarijní hedge: %{y:,.2f} EUR<extra></extra>",
+            )
+        )
+
+    # Opportunistic threshold guidelines if active
+    if enable_opp_hedge and opp_threshold_input < hedge_limit_input:
+        fig_nop.add_hline(
+            y=opp_threshold_input,
+            line_dash="dot",
+            line_color="#d97706",
+            annotation_text=f"Prah časování (+{opp_threshold_input:,.0f} EUR)",
+            annotation_position="top left",
+        )
+        fig_nop.add_hline(
+            y=-opp_threshold_input,
+            line_dash="dot",
+            line_color="#d97706",
+            annotation_text=f"Prah časování (-{opp_threshold_input:,.0f} EUR)",
+            annotation_position="bottom left",
         )
 
     # Upper and lower hedge boundaries (Red Zone trigger)
@@ -537,7 +603,7 @@ with tab_nop:
     fig_nop.add_hline(y=0, line_color="#94a3b8", line_width=1)
 
     fig_nop.update_layout(
-        title="Vývoj otevřené pozice (NOP) vůči třízónovému rámci řízení rizik",
+        title="Vývoj otevřené pozice (NOP) vůči třízónovému rámci a oportunistickým prahům",
         xaxis_title="Datum a čas",
         yaxis_title="Pozice v EUR",
         template="plotly_white",
@@ -580,14 +646,24 @@ col_f1, col_f2 = st.columns([2, 1])
 with col_f1:
     filter_type = st.radio(
         "Filtrovat transakce:",
-        options=["Všechny", "Pouze klientské obchody", "Pouze externí hedge"],
+        options=[
+            "Všechny",
+            "Pouze klientské obchody",
+            "Všechny externí hedgy",
+            "Pouze oportunistické hedgy",
+            "Pouze havarijní hedgy (Hard Stop)",
+        ],
         horizontal=True,
     )
 
 if filter_type == "Pouze klientské obchody":
     display_df = df_records[df_records["event_type"] == "CLIENT"]
-elif filter_type == "Pouze externí hedge":
+elif filter_type == "Všechny externí hedgy":
     display_df = df_records[df_records["event_type"] == "HEDGE"]
+elif filter_type == "Pouze oportunistické hedgy":
+    display_df = df_records[(df_records["event_type"] == "HEDGE") & (df_records["event_subtype"] == "OPPORTUNISTIC")]
+elif filter_type == "Pouze havarijní hedgy (Hard Stop)":
+    display_df = df_records[(df_records["event_type"] == "HEDGE") & (df_records["event_subtype"] != "OPPORTUNISTIC")]
 else:
     display_df = df_records
 
@@ -606,6 +682,7 @@ st.dataframe(
         "trade_id",
         "timestamp",
         "event_type",
+        "event_subtype",
         "side",
         "volume_eur",
         "execution_rate",

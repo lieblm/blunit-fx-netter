@@ -15,8 +15,11 @@ class NetterEngine:
     - Nets client flows against the omnibus account.
     - Charges bid/ask spread and accumulates spread revenue.
     - Tracks Net Open Position (NOP) in EUR.
-    - Triggers auto-hedging against external market at current market rate when NOP limit is reached.
-    - Supports full hedging (reset to 0) or partial hedging (reduction to target buffer ratio).
+    - Triggers auto-hedging against external market at current market rate.
+    - Supports:
+        1. Full hedging (reset to 0 EUR).
+        2. Partial hedging (reduction to target buffer ratio).
+        3. Opportunistic hedging (smart market-timing of inventory reduction before hitting hard stop).
     - Maintains a complete chronological ledger (trade_log) for audit and CSV export.
     """
 
@@ -25,10 +28,20 @@ class NetterEngine:
         pricing_model: Optional[PricingModel] = None,
         hedge_limit: float = 25_000.0,
         hedge_target_ratio: float = 0.0,
+        enable_opportunistic_hedge: bool = False,
+        opportunistic_threshold: float = 17_500.0,
+        timing_window: int = 20,
+        timing_k: float = 0.75,
     ) -> None:
         self.pricing_model: PricingModel = pricing_model or PricingModel(hedge_limit=hedge_limit)
         self.hedge_limit: float = hedge_limit
         self.hedge_target_ratio: float = max(0.0, min(0.9, hedge_target_ratio))
+        self.enable_opportunistic_hedge: bool = enable_opportunistic_hedge
+        self.opportunistic_threshold: float = opportunistic_threshold
+        self.timing_window: int = timing_window
+        self.timing_k: float = timing_k
+        self.rate_history: List[float] = []
+
         self.account: AccountState = AccountState()
         self.executions: List[ExecutionReport] = []
         self.hedges: List[HedgeTrade] = []
@@ -47,7 +60,7 @@ class NetterEngine:
         current_market_rate: Optional[float] = None,
     ) -> Tuple[ExecutionReport, Optional[HedgeTrade]]:
         """
-        Process an incoming client order, update balances, and evaluate hedge trigger.
+        Process an incoming client order, update balances, and evaluate hedge triggers.
 
         Args:
             order: Client order instance.
@@ -58,6 +71,7 @@ class NetterEngine:
         """
         mid_rate = current_market_rate if current_market_rate is not None else self.pricing_model.mid_rate
         self.last_market_rate = mid_rate
+        self.rate_history.append(mid_rate)
 
         rate = self.pricing_model.get_client_rate(
             side=order.side,
@@ -118,17 +132,52 @@ class NetterEngine:
                 market_rate=mid_rate,
                 running_pnl_czk=running_mtm_czk,
                 running_pnl_eur=running_mtm_eur,
+                event_subtype="",
             )
         )
 
-        # Check auto-hedging condition
+        # Evaluate auto-hedging triggers
         hedge_trade = None
-        if abs(self.account.nop_eur) >= self.hedge_limit:
-            hedge_trade = self._execute_hedge(timestamp=order.timestamp, market_rate=mid_rate)
+        nop = self.account.nop_eur
+
+        # Trigger 1: Hard Stop emergency hedge
+        if abs(nop) >= self.hedge_limit:
+            hedge_trade = self._execute_hedge(
+                timestamp=order.timestamp,
+                market_rate=mid_rate,
+                hedge_type="HARD_STOP",
+            )
+        # Trigger 2: Opportunistic Hedging (favorable market timing of inventory reduction)
+        elif self.enable_opportunistic_hedge and abs(nop) >= self.opportunistic_threshold:
+            if len(self.rate_history) >= max(5, self.timing_window // 2):
+                recent_rates = self.rate_history[-self.timing_window:]
+                mean_rate = sum(recent_rates) / len(recent_rates)
+                variance = sum((r - mean_rate) ** 2 for r in recent_rates) / len(recent_rates)
+                std_rate = variance ** 0.5 or 0.0001
+
+                # If long EUR: offload EUR when market rate is at or above upper band
+                if nop > 0 and mid_rate >= (mean_rate + self.timing_k * std_rate):
+                    hedge_trade = self._execute_hedge(
+                        timestamp=order.timestamp,
+                        market_rate=mid_rate,
+                        hedge_type="OPPORTUNISTIC",
+                    )
+                # If short EUR: cover EUR when market rate is at or below lower band
+                elif nop < 0 and mid_rate <= (mean_rate - self.timing_k * std_rate):
+                    hedge_trade = self._execute_hedge(
+                        timestamp=order.timestamp,
+                        market_rate=mid_rate,
+                        hedge_type="OPPORTUNISTIC",
+                    )
 
         return exec_report, hedge_trade
 
-    def _execute_hedge(self, timestamp, market_rate: Optional[float] = None) -> HedgeTrade:
+    def _execute_hedge(
+        self,
+        timestamp,
+        market_rate: Optional[float] = None,
+        hedge_type: str = "HARD_STOP",
+    ) -> HedgeTrade:
         """
         Execute an external market hedge trade at market rate.
         If hedge_target_ratio is 0.0, resets NOP to 0.
@@ -167,6 +216,7 @@ class NetterEngine:
             volume_czk=czk_amount,
             nop_before_eur=nop_before,
             nop_after_eur=self.account.nop_eur,
+            hedge_type=hedge_type,
         )
         self.hedges.append(hedge)
 
@@ -191,6 +241,7 @@ class NetterEngine:
                 market_rate=mid_rate,
                 running_pnl_czk=running_mtm_czk,
                 running_pnl_eur=running_mtm_eur,
+                event_subtype=hedge_type,
             )
         )
 
@@ -205,6 +256,7 @@ class NetterEngine:
             "trade_id",
             "timestamp",
             "event_type",
+            "event_subtype",
             "side",
             "volume_eur",
             "execution_rate",
@@ -226,6 +278,7 @@ class NetterEngine:
                     "trade_id": record.trade_id,
                     "timestamp": record.timestamp.isoformat(),
                     "event_type": record.event_type,
+                    "event_subtype": record.event_subtype,
                     "side": record.side.value,
                     "volume_eur": f"{record.volume_eur:.2f}",
                     "execution_rate": f"{record.execution_rate:.4f}",
@@ -254,6 +307,9 @@ class NetterEngine:
         sell_vol_eur = sum(e.volume_eur for e in sell_orders)
 
         total_hedged_eur = sum(h.volume_eur for h in self.hedges)
+        hard_hedges = [h for h in self.hedges if h.hedge_type == "HARD_STOP"]
+        opp_hedges = [h for h in self.hedges if h.hedge_type == "OPPORTUNISTIC"]
+
         mtm_pnl_czk = self.account.mtm_pnl_czk(self.last_market_rate)
         mtm_pnl_eur = mtm_pnl_czk / self.last_market_rate if self.last_market_rate else 0.0
 
@@ -269,6 +325,8 @@ class NetterEngine:
             "buy_volume_eur": buy_vol_eur,
             "sell_volume_eur": sell_vol_eur,
             "hedge_count": len(self.hedges),
+            "hard_hedge_count": len(hard_hedges),
+            "opportunistic_hedge_count": len(opp_hedges),
             "total_hedged_eur": total_hedged_eur,
             "netted_volume_eur": netted_vol_eur,
             "netting_rate_pct": netting_rate,
@@ -285,6 +343,8 @@ class NetterEngine:
             "spread_pct": self.pricing_model.spread_pct,
             "hedge_limit_eur": self.hedge_limit,
             "hedge_target_ratio": self.hedge_target_ratio,
+            "enable_opportunistic_hedge": self.enable_opportunistic_hedge,
+            "opportunistic_threshold": self.opportunistic_threshold,
             "skew_factor": self.pricing_model.skew_factor,
             "total_records": len(self.trade_log),
         }

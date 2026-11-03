@@ -287,7 +287,12 @@ class SimulationRunner:
         netting_rate = summary.get("netting_rate_pct", summary.get("internalization_rate_pct", 0.0))
 
         print("\n [Netting & Risk Management]")
-        print(f"   Hedge Operations:       {summary['hedge_count']:,} external market trade(s)")
+        opp_count = summary.get('opportunistic_hedge_count', 0)
+        hard_count = summary.get('hard_hedge_count', summary['hedge_count'])
+        if opp_count > 0:
+            print(f"   Hedge Operations:       {summary['hedge_count']:,} external market trade(s) (Opportunistic: {opp_count}, Hard Stop: {hard_count})")
+        else:
+            print(f"   Hedge Operations:       {summary['hedge_count']:,} external market trade(s)")
         print(f"   Total Hedged Volume:    {summary['total_hedged_eur']:,.2f} EUR")
         print(f"   Netted Volume:          {netted_vol:,.2f} EUR")
         print(f"   Netting Rate:           {netting_rate:.2f}%")

@@ -148,6 +148,46 @@ class TestInternalizerEngine(unittest.TestCase):
         self.assertAlmostEqual(partial_engine.nop_eur, -5_000.0)
         self.assertAlmostEqual(hedge.nop_after_eur, -5_000.0)
 
+    def test_opportunistic_hedge(self):
+        engine = InternalizerEngine(
+            pricing_model=self.pricing,
+            hedge_limit=10_000.0,
+            hedge_target_ratio=0.5,
+            enable_opportunistic_hedge=True,
+            opportunistic_threshold=5_000.0,
+            timing_window=5,
+            timing_k=0.5,
+        )
+        # Establish rate history around 24.50
+        for i in range(5):
+            order = ClientOrder(
+                order_id=f"ORD-PRE-{i}",
+                timestamp=datetime(2026, 1, 1, 10, i, 0, tzinfo=timezone.utc),
+                side=OrderSide.SELL,
+                volume_eur=1_000.0,
+            )
+            engine.process_order(order, current_market_rate=24.50)
+
+        # Current NOP is +5_000 EUR (at opportunistic threshold)
+        self.assertAlmostEqual(engine.nop_eur, 5_000.0)
+        self.assertEqual(len(engine.hedges), 0)
+
+        # Client sells EUR 1 000 at a higher market rate (24.70), creating a peak
+        spike_order = ClientOrder(
+            order_id="ORD-SPIKE",
+            timestamp=datetime(2026, 1, 1, 10, 10, 0, tzinfo=timezone.utc),
+            side=OrderSide.SELL,
+            volume_eur=1_000.0,
+        )
+        _, hedge = engine.process_order(spike_order, current_market_rate=24.70)
+
+        # Opportunistic hedge should trigger because NOP >= 5_000 and rate is elevated!
+        self.assertIsNotNone(hedge)
+        self.assertEqual(hedge.hedge_type, "OPPORTUNISTIC")
+        self.assertEqual(hedge.side, OrderSide.SELL)
+        # Hard limit (10_000) was never breached
+        self.assertLess(6_000.0, engine.hedge_limit)
+
     def test_csv_export(self):
         order = ClientOrder(
             order_id="ORD-CSV",

@@ -50,6 +50,7 @@ class HedgeTrade:
     volume_czk: float
     nop_before_eur: float
     nop_after_eur: float
+    hedge_type: str = "HARD_STOP"  # "HARD_STOP" or "OPPORTUNISTIC"
 
 
 @dataclass
@@ -92,4 +93,4 @@ class TradeRecord:
     market_rate: float
     running_pnl_czk: float
     running_pnl_eur: float
-
+    event_subtype: str = "" # "HARD_STOP", "OPPORTUNISTIC", or empty for CLIENT

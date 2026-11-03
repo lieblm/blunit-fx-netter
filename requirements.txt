@@ -1,3 +1,6 @@
 # Core PoC runs with standard library (Python >= 3.10)
-# Optional dependencies:
+# Optional and UI dependencies:
 pandas>=2.0.0
+streamlit>=1.30.0
+plotly>=5.18.0
+

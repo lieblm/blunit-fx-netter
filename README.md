@@ -4,7 +4,7 @@ Proof of Concept (PoC) pro interní Netting & Market Maker engine směny měnov�
 
 Systém demonstruje vnitřní netting a internalizaci klientských FX směn na sběrném účtu (omnibus account) bez nutnosti odesílat každý klientský pokyn na externí trh. Zisk tvoří vybraný spread z klientských transakcí. Tržní riziko je řízeno sledováním čisté otevřené pozice (**Net Open Position - NOP**) a automatickým zajišťováním (**Auto-Hedging**) na mezibankovním/externím trhu při dosažení stanoveného limitu.
 
-Systém podporuje jak rychlou syntetickou simulaci, tak **plný backtest na skutečných historických kurzech EUR/CZK** (4hodinové svíčky H4) s možností volby počátku a konce testu a exportem výsledků do CSV.
+Systém podporuje jak rychlou syntetickou simulaci, tak **plný backtest na skutečných historických kurzech EUR/CZK** (4hodinové svíčky H4) s možností volby počátku a konce testu, exportem výsledků do CSV a **interaktivním webovým dashboardem** pro vizualizaci a řízení.
 
 ---
 
@@ -24,6 +24,9 @@ Systém podporuje jak rychlou syntetickou simulaci, tak **plný backtest na skut
 5. **Detailní ledger & CSV export:**
    - Každá klientská i hedge transakce zaznamenává přesný čas, objem, kurz, vybraný spread, zůstatky obou měn, NOP a průběžné Mark-to-Market PnL.
    - Možnost exportu do CSV souboru i přímého výpisu do konzole.
+6. **Interaktivní Web Dashboard:**
+   - Prohlížení a konfigurace simulací v reálném čase prostřednictvím webového rozhraní (Streamlit & Plotly).
+   - Vizuální KPI karty, grafy vývoje zisku, sledování NOP s body hedgingu a interaktivní tabulka ledgeru.
 
 ---
 
@@ -49,12 +52,13 @@ blunit-fx-netter/
 ├── scripts/
 │   ├── build_h4_dataset.py  # Skript pro stažení/sestavení kompletního H4 datasetu
 │   └── fetch_all_data.py    # Pomocný skript pro stahování dat
+├── app.py                   # Interaktivní webový dashboard (Streamlit + Plotly)
 ├── main.py                  # CLI vstupní bod simulátoru
 ├── pyproject.toml           # Konfigurace balíčku
-├── requirements.txt         # Volitelné závislosti (pandas)
+├── requirements.txt         # Závislosti projektu (streamlit, plotly, pandas)
 ├── MANAZERSKE_SHRNUTI.md    # Manažerské shrnutí srovnání 2023 vs 2025
 ├── .gitignore
-├── GEMINI_ blunit-fx-netter.md # Směrnice asistenta
+├── GEMINI.md                # Směrnice asistenta
 └── README.md                # Tato dokumentace
 
 ```
@@ -64,7 +68,29 @@ blunit-fx-netter/
 ## Požadavky a instalace
 
 - **Python 3.10+**
-- Jádro systému využívá **čistou standardní knihovnu Pythonu** (žádné povinné externí knihovny).
+- Jádro systému využívá **čistou standardní knihovnu Pythonu** (žádné povinné externí knihovny pro běh CLI jádra).
+- Pro spuštění webového dashboardu a pokročilou analýzu nainstalujte závislosti:
+  ```bash
+  pip install -r requirements.txt
+  ```
+
+---
+
+## Spuštění webového dashboardu
+
+Interaktivní webové rozhraní spustíte příkazem:
+
+```bash
+streamlit run app.py
+```
+*(Při použití lokálního virtuálního prostředí: `./.venv/bin/streamlit run app.py`)*
+
+Dashboard nabízí:
+- Volbu časového intervalu (přednastaveno na rok 2025 nebo 2023, případně vlastní rozsah).
+- Dynamickou úpravu spreadu, limitu NOP a frekvence klientských pokynů.
+- Okamžitý přepočet KPI (obrat, míra internalizace, čistý MtM zisk, počet hedgů).
+- Interaktivní grafy kumulativního zisku a křivky NOP s vyznačenými zásahy externího trhu.
+- Filtrovatelný ledger transakcí a tlačítko pro stažení výsledného CSV.
 
 ---
 

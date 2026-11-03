@@ -97,3 +97,79 @@ Využívá se statistické pásmo odchylky od klouzavého průměru (Bollingerov
 * **Míra internalizace:** **93,50 %**.
 * **Čistý zisk (Mark-to-Market):** **+178 060 CZK**.
 * **Manažerský závěr:** Tři čtvrtiny všech externích zásahů byly provedeny z vlastní iniciativy za zvýhodněný tržní kurz, nikoliv z nuceného překročení limitu.
+
+---
+
+## 7. Komplexní historický backtest 2000–2024 (25 let provozu)
+
+Pro otestování robustnosti optimalizovaného modelu a oportunistického hedgingu byl proveden ucelený historický backtest napříč **25 lety tržního vývoje (2000–2024)** na reálných tržních kurzech ČNB a tickových datech. 
+
+### Parametry testu
+* **Limit otevřené pozice (NOP):** 25 000 EUR
+* **Cílový poměr zajištění (Hedge target ratio):** 50 % (buffer 12 500 EUR pro přirozený netting)
+* **Cenové vychylování (Inventory Skewing):** 5 bps (posun klientského spreadu podle stavu knihy)
+* **Oportunistický hedging:** aktivní od $\pm 17\,500\ \text{EUR}$, parametr $k = 0{,}75 \times \sigma$ (Bollinger 20 period H4)
+* **Klientský tok:** simulace identického profilu jako v referenčním roce 2025 (~1 554 objednávek ročně, průměrný objem 2 287 EUR/objednávka)
+
+---
+
+### Agregované statistiky za celé období (2000–2024)
+
+| Metrika | Hodnota za 25 let | Roční průměr |
+| :--- | :--- | :--- |
+| **Celkový klientský obrat** | **88,86 mil. EUR** (2 441 mil. CZK) | 3,55 mil. EUR / rok |
+| **Zpracované objednávky** | **38 850 pokynů** | 1 554 pokynů / rok |
+| **Průměrná míra internalizace** | **92,94 %** | min. 92,00 % (2006) – max. 93,79 % (2001) |
+| **Celkem externích hedge obchodů** | **773 obchodů** | ~31 obchodů / rok |
+| ↳ **Oportunistické (v zisku za prémiový kurz)** | **622 obchodů (80,5 %)** | **~25 obchodů / rok** |
+| ↳ **Havarijní pojistka (Hard Stop 25k EUR)** | **151 obchodů (19,5 %)** | ~6 obchodů / rok |
+| **Hrubý realizovaný spread** | **4 874 770 CZK** | 194 991 CZK / rok |
+| **Čistý kumulativní zisk (Clean MtM PnL)** | **+4 988 016 CZK** (~ +183 051 EUR) | **+199 521 CZK / rok** |
+| **Ziskové vs. ztrátové roky** | **25 / 25 ziskových let (100,0 %)** | min. +165 113 CZK – max. +267 922 CZK |
+| **Průměrný denní VaR (99 % konfidence)** | **3 789 CZK** | max. 4 598 CZK (v roce 2000) |
+
+---
+
+### Roční přehled výsledků (2000–2024)
+
+| Rok | Objednávky | Obrat (EUR) | Internalizace | Zajištěno (EUR) | Hedge celkem | Oportunistické | Hard Stop | Realizovaný spread | Čistý MtM zisk (CZK) | Denní VaR 99% |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **2000** | 1 506 | 3 447 900 | 93,17 % | 235 350 | 30 | 25 | 5 | 245 072 CZK | **+244 238 CZK** | 4 598 CZK |
+| **2001** | 1 506 | 3 447 900 | 93,79 % | 214 250 | 25 | 17 | 8 | 234 428 CZK | **+215 690 CZK** | 4 135 CZK |
+| **2002** | 1 512 | 3 466 500 | 93,60 % | 221 800 | 26 | 19 | 7 | 213 146 CZK | **+194 199 CZK** | 4 464 CZK |
+| **2003** | 1 512 | 3 466 500 | 93,14 % | 237 850 | 32 | 27 | 5 | 220 361 CZK | **+207 362 CZK** | 4 553 CZK |
+| **2004** | 1 524 | 3 492 050 | 92,92 % | 247 100 | 30 | 26 | 4 | 222 545 CZK | **+214 059 CZK** | 4 273 CZK |
+| **2005** | 1 518 | 3 479 700 | 92,38 % | 265 150 | 35 | 30 | 5 | 207 130 CZK | **+234 426 CZK** | 4 151 CZK |
+| **2006** | 1 506 | 3 447 900 | 92,00 % | 275 750 | 30 | 22 | 8 | 195 607 CZK | **+198 854 CZK** | 3 962 CZK |
+| **2007** | 1 506 | 3 447 900 | 92,03 % | 274 850 | 32 | 23 | 9 | 191 510 CZK | **+182 756 CZK** | 3 655 CZK |
+| **2008** | 1 518 | 3 479 700 | 92,51 % | 260 550 | 35 | 29 | 6 | 173 489 CZK | **+182 055 CZK** | 3 465 CZK |
+| **2009** | 1 506 | 3 447 900 | 92,38 % | 262 900 | 33 | 27 | 6 | 182 295 CZK | **+184 361 CZK** | 3 707 CZK |
+| **2010** | 1 518 | 3 479 700 | 92,96 % | 245 100 | 29 | 23 | 6 | 175 842 CZK | **+188 924 CZK** | 3 504 CZK |
+| **2011** | 1 518 | 3 479 700 | 93,03 % | 242 650 | 30 | 24 | 6 | 170 900 CZK | **+203 327 CZK** | 3 688 CZK |
+| **2012** | 1 512 | 3 466 500 | 93,23 % | 234 750 | 30 | 23 | 7 | 174 007 CZK | **+195 456 CZK** | 3 475 CZK |
+| **2013** | 1 512 | 3 466 500 | 92,91 % | 245 850 | 29 | 21 | 8 | 179 907 CZK | **+189 191 CZK** | 3 822 CZK |
+| **2014** | 1 512 | 3 466 500 | 92,35 % | 265 150 | 35 | 32 | 3 | 190 772 CZK | **+196 370 CZK** | 3 775 CZK |
+| **2015** | 1 506 | 3 447 900 | 92,57 % | 256 350 | 31 | 26 | 5 | 188 028 CZK | **+194 722 CZK** | 3 892 CZK |
+| **2016** | 1 512 | 3 466 500 | 92,60 % | 256 450 | 32 | 29 | 3 | 187 255 CZK | **+192 375 CZK** | 3 565 CZK |
+| **2017** | 2 184 | 4 903 050 | 93,66 % | 310 700 | 37 | 27 | 10 | 257 517 CZK | **+267 922 CZK** | 3 454 CZK |
+| **2018** | 1 566 | 3 579 700 | 93,17 % | 244 600 | 36 | 34 | 2 | 183 094 CZK | **+193 401 CZK** | 3 440 CZK |
+| **2019** | 1 566 | 3 579 700 | 92,69 % | 261 750 | 32 | 26 | 6 | 183 499 CZK | **+184 819 CZK** | 3 542 CZK |
+| **2020** | 1 572 | 3 594 950 | 92,87 % | 256 250 | 30 | 20 | 10 | 190 031 CZK | **+204 809 CZK** | 3 683 CZK |
+| **2021** | 1 566 | 3 579 700 | 93,21 % | 243 200 | 31 | 26 | 5 | 182 989 CZK | **+194 372 CZK** | 3 385 CZK |
+| **2022** | 1 560 | 3 565 950 | 93,42 % | 234 550 | 29 | 24 | 5 | 174 536 CZK | **+174 357 CZK** | 3 458 CZK |
+| **2023** | 1 560 | 3 565 950 | 93,59 % | 228 400 | 28 | 23 | 5 | 170 615 CZK | **+165 113 CZK** | 3 440 CZK |
+| **2024** | 1 572 | 3 594 950 | 93,39 % | 237 550 | 26 | 19 | 7 | 180 195 CZK | **+184 859 CZK** | 3 627 CZK |
+
+---
+
+### Klíčové manažerské poznatky z 25letého testu
+
+1. **Absolutní stabilita míry internalizace:** Míra vnitřního vypořádání bez nutnosti vstupu na mezibankovní trh se v průběhu čtvrtstoletí držela v extrémně úzkém rozpětí **92,00 % až 93,79 %** bez ohledu na kurzový režim.
+2. **Dominance oportunistických zajištění (80,5 %):** Z celkových 773 externích zásahů bylo **622 provedeno proaktivně v lokálních cenových extrémech ve prospěch platformy**, čímž byl čistý zisk navýšen nad úroveň čistého spreadu (Clean MtM PnL 4,99 mil. CZK vs. hrubý spread 4,87 mil. CZK).
+3. **100% ziskovost všech 25 let:** Model dosáhl kladného čistého výsledku v každém jednotlivém kalendářním roce (v rozpětí od +165 tis. do +268 tis. CZK), a to i v obdobích:
+   * Dlouhodobého posilování koruny z 36,00 na 24,00 CZK/EUR (2000–2008),
+   * Globální finanční krize (2008–2009),
+   * Intervenčního režimu ČNB s fixním stropem 27,00 CZK/EUR (2013–2017),
+   * Pandemických výkyvů a bleskových pohybů (2020),
+   * Energetické krize a války na Ukrajině (2022).
+4. **Minimální tržní expozice:** Průměrný jednodenní 99% Value at Risk nepřesáhl **3 789 CZK** (cca 1,9 % průměrného ročního čistého zisku), což potvrzuje striktní soulad s regulatorními a kapitálovými požadavky.

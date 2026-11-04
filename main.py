@@ -128,6 +128,34 @@ def parse_args() -> argparse.Namespace:
         help="Standard deviation multiplier for timing trigger",
     )
     parser.add_argument(
+        "--max-holding-hours",
+        type=float,
+        default=None,
+        help="Maximum hours to hold an unbalanced position before triggering Time-Stop hedge",
+    )
+    parser.add_argument(
+        "--time-decay",
+        action="store_true",
+        help="Enable dynamic decay of opportunistic threshold and k-factor over holding duration",
+    )
+    parser.add_argument(
+        "--weekend-flatten",
+        action="store_true",
+        help="Enable flattening of position on Friday before market close (16:00 UTC)",
+    )
+    parser.add_argument(
+        "--weekend-flatten-threshold",
+        type=float,
+        default=5_000.0,
+        help="Target maximum NOP in EUR allowed over the weekend",
+    )
+    parser.add_argument(
+        "--large-order-threshold",
+        type=float,
+        default=None,
+        help="Order volume threshold in EUR to trigger block order pass-through splitting",
+    )
+    parser.add_argument(
         "--export-csv",
         type=str,
         default="fxdata/simulation_results.csv",
@@ -192,6 +220,12 @@ def main() -> None:
             opportunistic_threshold=args.opportunistic_threshold,
             timing_window=args.timing_window,
             timing_k=args.timing_k,
+            max_holding_hours=args.max_holding_hours,
+            enable_time_decay=args.time_decay,
+            enable_weekend_flattening=args.weekend_flatten,
+            weekend_flatten_hour=16,
+            weekend_flatten_threshold=args.weekend_flatten_threshold,
+            large_order_threshold=args.large_order_threshold,
         )
         runner = SimulationRunner(engine=engine)
 
@@ -217,6 +251,12 @@ def main() -> None:
             opportunistic_threshold=args.opportunistic_threshold,
             timing_window=args.timing_window,
             timing_k=args.timing_k,
+            max_holding_hours=args.max_holding_hours,
+            enable_time_decay=args.time_decay,
+            enable_weekend_flattening=args.weekend_flatten,
+            weekend_flatten_hour=16,
+            weekend_flatten_threshold=args.weekend_flatten_threshold,
+            large_order_threshold=args.large_order_threshold,
         )
         generator = OrderGenerator(seed=args.seed)
         runner = SimulationRunner(engine=engine)

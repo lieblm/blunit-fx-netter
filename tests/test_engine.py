@@ -2,7 +2,7 @@
 
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from blunit_fx.models import OrderSide, ClientOrder, TradeRecord
@@ -188,6 +188,92 @@ class TestInternalizerEngine(unittest.TestCase):
         # Hard limit (10_000) was never breached
         self.assertLess(6_000.0, engine.hedge_limit)
 
+    def test_position_aging_time_stop(self):
+        engine = InternalizerEngine(
+            pricing_model=self.pricing,
+            hedge_limit=10_000.0,
+            hedge_target_ratio=0.5,
+            max_holding_hours=24.0,
+        )
+        t0 = datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+        order = ClientOrder(
+            order_id="ORD-AGING-1",
+            timestamp=t0,
+            side=OrderSide.BUY,
+            volume_eur=4_000.0,
+        )
+        engine.process_order(order, current_market_rate=24.50)
+        self.assertAlmostEqual(engine.nop_eur, -4_000.0)
+        self.assertEqual(len(engine.hedges), 0)
+
+        # Tick at t0 + 12 hours: should not trigger time-stop
+        t_12h = datetime(2026, 1, 1, 22, 0, 0, tzinfo=timezone.utc)
+        hedge_12 = engine.evaluate_market_tick(t_12h, market_rate=24.50)
+        self.assertIsNone(hedge_12)
+        self.assertEqual(len(engine.hedges), 0)
+
+        # Tick at t0 + 25 hours: should trigger TIME_STOP hedge
+        t_25h = datetime(2026, 1, 2, 11, 0, 0, tzinfo=timezone.utc)
+        hedge_25 = engine.evaluate_market_tick(t_25h, market_rate=24.50)
+        self.assertIsNotNone(hedge_25)
+        self.assertEqual(hedge_25.hedge_type, "TIME_STOP")
+        self.assertEqual(hedge_25.side, OrderSide.BUY)
+        # NOP reduced to target ratio (50% of 10k = 5k buffer) -> since -4k <= 5k, it reduces to target_nop_mag
+        self.assertAlmostEqual(engine.nop_eur, 0.0)
+
+    def test_weekend_flattening(self):
+        engine = InternalizerEngine(
+            pricing_model=self.pricing,
+            hedge_limit=25_000.0,
+            enable_weekend_flattening=True,
+            weekend_flatten_hour=16,
+            weekend_flatten_threshold=5_000.0,
+        )
+        # Friday 15:00 UTC (not yet 16:00)
+        t_fri_15 = datetime(2026, 1, 2, 15, 0, 0, tzinfo=timezone.utc) # 2026-01-02 was Friday
+        self.assertEqual(t_fri_15.weekday(), 4)
+        order = ClientOrder(
+            order_id="ORD-FRI",
+            timestamp=t_fri_15,
+            side=OrderSide.SELL,
+            volume_eur=12_000.0,
+        )
+        engine.process_order(order, current_market_rate=24.50)
+        self.assertAlmostEqual(engine.nop_eur, 12_000.0)
+        self.assertEqual(len(engine.hedges), 0)
+
+        # Friday 16:30 UTC -> triggers weekend flattening
+        t_fri_1630 = datetime(2026, 1, 2, 16, 30, 0, tzinfo=timezone.utc)
+        hedge = engine.evaluate_market_tick(t_fri_1630, market_rate=24.50)
+        self.assertIsNotNone(hedge)
+        self.assertEqual(hedge.hedge_type, "WEEKEND_FLATTEN")
+        self.assertEqual(hedge.side, OrderSide.SELL)
+        # Flattened down to 5 000 EUR
+        self.assertAlmostEqual(engine.nop_eur, 5_000.0)
+        self.assertAlmostEqual(hedge.volume_eur, 7_000.0)
+
+    def test_large_order_block_split(self):
+        engine = InternalizerEngine(
+            pricing_model=self.pricing,
+            hedge_limit=25_000.0,
+            large_order_threshold=15_000.0,
+            large_order_split_ratio=0.5,
+        )
+        t0 = datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+        large_order = ClientOrder(
+            order_id="ORD-BLOCK",
+            timestamp=t0,
+            side=OrderSide.BUY,
+            volume_eur=20_000.0,
+        )
+        exec_rep, hedge = engine.process_order(large_order, current_market_rate=24.50)
+
+        # Split 50% = 10 000 EUR immediately hedged
+        self.assertIsNotNone(hedge)
+        self.assertEqual(hedge.hedge_type, "BLOCK_SPLIT")
+        self.assertEqual(hedge.volume_eur, 10_000.0)
+        self.assertAlmostEqual(engine.nop_eur, -10_000.0)
+
     def test_csv_export(self):
         order = ClientOrder(
             order_id="ORD-CSV",
@@ -250,6 +336,30 @@ class TestSimulator(unittest.TestCase):
         self.assertEqual(summary["total_orders"], 4)
         self.assertIn("total_records", summary)
         self.assertGreater(summary["total_records"], 0)
+
+    def test_sparse_flow_simulation(self):
+        # 10 candles spanning 40 hours
+        candles = [
+            MarketCandle(
+                timestamp=datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc) + timedelta(hours=4 * i),
+                open=24.50 + 0.01 * i,
+                high=24.55 + 0.01 * i,
+                low=24.48 + 0.01 * i,
+                close=24.52 + 0.01 * i,
+            )
+            for i in range(10)
+        ]
+        # Low frequency: 0.3 probability per candle (~3 orders total)
+        engine = InternalizerEngine(
+            hedge_limit=10_000.0,
+            max_holding_hours=24.0,
+            enable_time_decay=True,
+        )
+        runner = SimulationRunner(engine=engine)
+        summary = runner.run_historical(candles, orders_per_candle=0.3, seed=123)
+
+        self.assertLess(summary["total_orders"], len(candles))
+        self.assertIn("time_stop_hedge_count", summary)
 
 
 if __name__ == "__main__":

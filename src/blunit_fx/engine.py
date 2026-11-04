@@ -32,6 +32,13 @@ class NetterEngine:
         opportunistic_threshold: float = 17_500.0,
         timing_window: int = 20,
         timing_k: float = 0.75,
+        max_holding_hours: Optional[float] = None,
+        enable_time_decay: bool = False,
+        enable_weekend_flattening: bool = False,
+        weekend_flatten_hour: int = 16,
+        weekend_flatten_threshold: float = 5_000.0,
+        large_order_threshold: Optional[float] = None,
+        large_order_split_ratio: float = 0.5,
     ) -> None:
         self.pricing_model: PricingModel = pricing_model or PricingModel(hedge_limit=hedge_limit)
         self.hedge_limit: float = hedge_limit
@@ -40,6 +47,13 @@ class NetterEngine:
         self.opportunistic_threshold: float = opportunistic_threshold
         self.timing_window: int = timing_window
         self.timing_k: float = timing_k
+        self.max_holding_hours: Optional[float] = max_holding_hours
+        self.enable_time_decay: bool = enable_time_decay
+        self.enable_weekend_flattening: bool = enable_weekend_flattening
+        self.weekend_flatten_hour: int = weekend_flatten_hour
+        self.weekend_flatten_threshold: float = weekend_flatten_threshold
+        self.large_order_threshold: Optional[float] = large_order_threshold
+        self.large_order_split_ratio: float = large_order_split_ratio
         self.rate_history: List[float] = []
 
         self.account: AccountState = AccountState()
@@ -48,11 +62,117 @@ class NetterEngine:
         self.trade_log: List[TradeRecord] = []
         self._hedge_sequence: int = 0
         self.last_market_rate: float = self.pricing_model.mid_rate
+        self.position_open_time: Optional[Any] = None
 
     @property
     def nop_eur(self) -> float:
         """Current Net Open Position in EUR."""
         return self.account.nop_eur
+
+    def _update_position_tracking(self, timestamp: Any, previous_nop: float) -> None:
+        """Track when the current non-zero position was initiated or flipped sign."""
+        current_nop = self.account.nop_eur
+        if abs(current_nop) < 1e-4:
+            self.position_open_time = None
+        elif abs(previous_nop) < 1e-4:
+            self.position_open_time = timestamp
+        elif (previous_nop > 0 and current_nop < 0) or (previous_nop < 0 and current_nop > 0):
+            self.position_open_time = timestamp
+
+    def get_holding_duration_hours(self, current_time: Any) -> float:
+        """Return holding duration of current open position in hours."""
+        if self.position_open_time is None or abs(self.account.nop_eur) < 1e-4:
+            return 0.0
+        return max(0.0, (current_time - self.position_open_time).total_seconds() / 3600.0)
+
+    def evaluate_market_tick(
+        self,
+        timestamp: Any,
+        market_rate: Optional[float] = None,
+        update_rate_history: bool = True,
+    ) -> Optional[HedgeTrade]:
+        """
+        Evaluate risk triggers on market tick/candle (with or without orders).
+        1. Hard Stop (> hedge_limit)
+        2. Weekend Flattening (Friday >= weekend_flatten_hour)
+        3. Position Aging / Time-Stop (holding_hours >= max_holding_hours)
+        4. Opportunistic Hedging (with dynamic Time-Decay)
+        """
+        mid_rate = market_rate if market_rate is not None else self.last_market_rate
+        self.last_market_rate = mid_rate
+        if update_rate_history:
+            self.rate_history.append(mid_rate)
+
+        nop = self.account.nop_eur
+        if abs(nop) < 1e-4:
+            return None
+
+        # 1. Hard Stop emergency hedge
+        if abs(nop) >= self.hedge_limit:
+            return self._execute_hedge(
+                timestamp=timestamp,
+                market_rate=mid_rate,
+                hedge_type="HARD_STOP",
+            )
+
+        # 2. Weekend Flattening
+        if (
+            self.enable_weekend_flattening
+            and hasattr(timestamp, "weekday")
+            and timestamp.weekday() == 4
+            and getattr(timestamp, "hour", 0) >= self.weekend_flatten_hour
+        ):
+            if abs(nop) > self.weekend_flatten_threshold:
+                return self._execute_hedge(
+                    timestamp=timestamp,
+                    market_rate=mid_rate,
+                    hedge_type="WEEKEND_FLATTEN",
+                    target_nop_override=self.weekend_flatten_threshold,
+                )
+
+        # 3. Position Aging / Time-Stop
+        holding_hours = self.get_holding_duration_hours(timestamp)
+        if self.max_holding_hours is not None and self.max_holding_hours > 0:
+            if holding_hours >= self.max_holding_hours:
+                return self._execute_hedge(
+                    timestamp=timestamp,
+                    market_rate=mid_rate,
+                    hedge_type="TIME_STOP",
+                )
+
+        # 4. Opportunistic Hedging with dynamic Time-Decay
+        eff_threshold = self.opportunistic_threshold
+        eff_k = self.timing_k
+
+        if self.enable_time_decay and self.max_holding_hours and self.max_holding_hours > 0:
+            tau = min(1.0, holding_hours / self.max_holding_hours)
+            min_allowed_thresh = self.hedge_limit * self.hedge_target_ratio
+            eff_threshold = max(min_allowed_thresh, self.opportunistic_threshold * (1.0 - 0.5 * tau))
+            eff_k = max(0.0, self.timing_k * (1.0 - tau))
+
+        if self.enable_opportunistic_hedge and abs(nop) >= eff_threshold:
+            if len(self.rate_history) >= max(5, self.timing_window // 2):
+                recent_rates = self.rate_history[-self.timing_window:]
+                mean_rate = sum(recent_rates) / len(recent_rates)
+                variance = sum((r - mean_rate) ** 2 for r in recent_rates) / len(recent_rates)
+                std_rate = variance ** 0.5 or 0.0001
+
+                # If long EUR: offload EUR when market rate is at or above upper band
+                if nop > 0 and mid_rate >= (mean_rate + eff_k * std_rate):
+                    return self._execute_hedge(
+                        timestamp=timestamp,
+                        market_rate=mid_rate,
+                        hedge_type="OPPORTUNISTIC",
+                    )
+                # If short EUR: cover EUR when market rate is at or below lower band
+                elif nop < 0 and mid_rate <= (mean_rate - eff_k * std_rate):
+                    return self._execute_hedge(
+                        timestamp=timestamp,
+                        market_rate=mid_rate,
+                        hedge_type="OPPORTUNISTIC",
+                    )
+
+        return None
 
     def process_order(
         self,
@@ -69,6 +189,7 @@ class NetterEngine:
         Returns:
             Tuple of (ExecutionReport, Optional[HedgeTrade])
         """
+        nop_before = self.account.nop_eur
         mid_rate = current_market_rate if current_market_rate is not None else self.pricing_model.mid_rate
         self.last_market_rate = mid_rate
         self.rate_history.append(mid_rate)
@@ -97,6 +218,7 @@ class NetterEngine:
             self.account.balance_czk -= volume_czk
 
         self.account.total_spread_profit_czk += spread_profit
+        self._update_position_tracking(order.timestamp, nop_before)
 
         exec_report = ExecutionReport(
             order_id=order.order_id,
@@ -136,57 +258,52 @@ class NetterEngine:
             )
         )
 
-        # Evaluate auto-hedging triggers
-        hedge_trade = None
-        nop = self.account.nop_eur
-
-        # Trigger 1: Hard Stop emergency hedge
-        if abs(nop) >= self.hedge_limit:
-            hedge_trade = self._execute_hedge(
+        # Block split check for large orders
+        split_hedge = None
+        if (
+            self.large_order_threshold is not None
+            and order.volume_eur >= self.large_order_threshold
+            and self.large_order_split_ratio > 0.0
+        ):
+            split_vol = order.volume_eur * self.large_order_split_ratio
+            split_hedge = self._execute_hedge(
                 timestamp=order.timestamp,
                 market_rate=mid_rate,
-                hedge_type="HARD_STOP",
+                hedge_type="BLOCK_SPLIT",
+                target_nop_override=max(0.0, abs(self.account.nop_eur) - split_vol),
             )
-        # Trigger 2: Opportunistic Hedging (favorable market timing of inventory reduction)
-        elif self.enable_opportunistic_hedge and abs(nop) >= self.opportunistic_threshold:
-            if len(self.rate_history) >= max(5, self.timing_window // 2):
-                recent_rates = self.rate_history[-self.timing_window:]
-                mean_rate = sum(recent_rates) / len(recent_rates)
-                variance = sum((r - mean_rate) ** 2 for r in recent_rates) / len(recent_rates)
-                std_rate = variance ** 0.5 or 0.0001
 
-                # If long EUR: offload EUR when market rate is at or above upper band
-                if nop > 0 and mid_rate >= (mean_rate + self.timing_k * std_rate):
-                    hedge_trade = self._execute_hedge(
-                        timestamp=order.timestamp,
-                        market_rate=mid_rate,
-                        hedge_type="OPPORTUNISTIC",
-                    )
-                # If short EUR: cover EUR when market rate is at or below lower band
-                elif nop < 0 and mid_rate <= (mean_rate - self.timing_k * std_rate):
-                    hedge_trade = self._execute_hedge(
-                        timestamp=order.timestamp,
-                        market_rate=mid_rate,
-                        hedge_type="OPPORTUNISTIC",
-                    )
+        # Evaluate auto-hedging triggers
+        hedge_trade = self.evaluate_market_tick(
+            timestamp=order.timestamp,
+            market_rate=mid_rate,
+            update_rate_history=False,
+        )
 
-        return exec_report, hedge_trade
+        final_hedge = hedge_trade or split_hedge
+        return exec_report, final_hedge
 
     def _execute_hedge(
         self,
-        timestamp,
+        timestamp: Any,
         market_rate: Optional[float] = None,
         hedge_type: str = "HARD_STOP",
+        target_nop_override: Optional[float] = None,
     ) -> HedgeTrade:
         """
         Execute an external market hedge trade at market rate.
-        If hedge_target_ratio is 0.0, resets NOP to 0.
-        If hedge_target_ratio > 0.0, brings NOP down to hedge_limit * hedge_target_ratio.
+        If target_nop_override is set, brings NOP down to target_nop_override.
+        Otherwise, if hedge_target_ratio is 0.0, resets NOP to 0;
+        if hedge_target_ratio > 0.0, brings NOP down to hedge_limit * hedge_target_ratio.
         """
         self._hedge_sequence += 1
         nop_before = self.account.nop_eur
 
-        target_nop_mag = self.hedge_limit * self.hedge_target_ratio
+        if target_nop_override is not None:
+            target_nop_mag = target_nop_override
+        else:
+            target_nop_mag = self.hedge_limit * self.hedge_target_ratio
+
         target_nop = target_nop_mag if nop_before > 0 else -target_nop_mag
         hedge_volume = abs(nop_before) - abs(target_nop)
         if hedge_volume <= 0:
@@ -207,6 +324,8 @@ class NetterEngine:
             self.account.balance_eur += hedge_volume
             self.account.balance_czk -= czk_amount
 
+        self._update_position_tracking(timestamp, nop_before)
+
         hedge = HedgeTrade(
             hedge_id=f"HEDGE-{self._hedge_sequence:04d}",
             timestamp=timestamp,
@@ -218,6 +337,34 @@ class NetterEngine:
             nop_after_eur=self.account.nop_eur,
             hedge_type=hedge_type,
         )
+        self.hedges.append(hedge)
+
+        # Running Mark-to-Market PnL after hedge
+        running_mtm_czk = self.account.mtm_pnl_czk(mid_rate)
+        running_mtm_eur = running_mtm_czk / mid_rate if mid_rate > 0 else 0.0
+
+        # Record hedge to ledger
+        self.trade_log.append(
+            TradeRecord(
+                trade_id=hedge.hedge_id,
+                timestamp=timestamp,
+                event_type="HEDGE",
+                side=hedge_side,
+                volume_eur=hedge_volume,
+                execution_rate=mid_rate,
+                volume_czk=czk_amount,
+                spread_profit_czk=0.0,
+                balance_eur=self.account.balance_eur,
+                balance_czk=self.account.balance_czk,
+                nop_eur=self.account.nop_eur,
+                market_rate=mid_rate,
+                running_pnl_czk=running_mtm_czk,
+                running_pnl_eur=running_mtm_eur,
+                event_subtype=hedge_type,
+            )
+        )
+
+        return hedge
         self.hedges.append(hedge)
 
         # Running Mark-to-Market PnL after hedge
@@ -309,6 +456,9 @@ class NetterEngine:
         total_hedged_eur = sum(h.volume_eur for h in self.hedges)
         hard_hedges = [h for h in self.hedges if h.hedge_type == "HARD_STOP"]
         opp_hedges = [h for h in self.hedges if h.hedge_type == "OPPORTUNISTIC"]
+        time_stop_hedges = [h for h in self.hedges if h.hedge_type == "TIME_STOP"]
+        weekend_hedges = [h for h in self.hedges if h.hedge_type == "WEEKEND_FLATTEN"]
+        block_split_hedges = [h for h in self.hedges if h.hedge_type == "BLOCK_SPLIT"]
 
         mtm_pnl_czk = self.account.mtm_pnl_czk(self.last_market_rate)
         mtm_pnl_eur = mtm_pnl_czk / self.last_market_rate if self.last_market_rate else 0.0
@@ -327,6 +477,9 @@ class NetterEngine:
             "hedge_count": len(self.hedges),
             "hard_hedge_count": len(hard_hedges),
             "opportunistic_hedge_count": len(opp_hedges),
+            "time_stop_hedge_count": len(time_stop_hedges),
+            "weekend_flatten_hedge_count": len(weekend_hedges),
+            "block_split_hedge_count": len(block_split_hedges),
             "total_hedged_eur": total_hedged_eur,
             "netted_volume_eur": netted_vol_eur,
             "netting_rate_pct": netting_rate,
@@ -346,6 +499,11 @@ class NetterEngine:
             "enable_opportunistic_hedge": self.enable_opportunistic_hedge,
             "opportunistic_threshold": self.opportunistic_threshold,
             "skew_factor": self.pricing_model.skew_factor,
+            "max_holding_hours": self.max_holding_hours,
+            "enable_time_decay": self.enable_time_decay,
+            "enable_weekend_flattening": self.enable_weekend_flattening,
+            "weekend_flatten_threshold": self.weekend_flatten_threshold,
+            "large_order_threshold": self.large_order_threshold,
             "total_records": len(self.trade_log),
         }
 

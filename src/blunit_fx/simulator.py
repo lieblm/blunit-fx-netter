@@ -69,40 +69,64 @@ class OrderGenerator:
     def generate_orders_for_candles(
         self,
         candles: List[MarketCandle],
-        orders_per_candle: int = 1,
+        orders_per_candle: Union[int, float] = 1,
         min_volume: float = 500.0,
         max_volume: float = 4000.0,
         buy_probability: float = 0.50,
     ) -> List[tuple[ClientOrder, MarketCandle]]:
         """
         Generate orders synchronized with historical market candles.
+        Supports both high-frequency (orders_per_candle >= 1) and sparse flow (orders_per_candle < 1.0).
         Each order is matched to its corresponding candle and prevailing price.
         """
         order_candle_pairs: List[tuple[ClientOrder, MarketCandle]] = []
         counter = 0
 
         for candle in candles:
-            for j in range(orders_per_candle):
-                counter += 1
-                # Offset timestamp slightly within the 4-hour window
-                offset_seconds = (j * 3600) + self.rng.randint(60, 1800)
-                order_ts = candle.timestamp + timedelta(seconds=offset_seconds)
+            if orders_per_candle < 1.0:
+                # Stochastic arrival for sparse flow (e.g. 0.2 means ~20% probability per candle)
+                if self.rng.random() < orders_per_candle:
+                    counter += 1
+                    offset_seconds = self.rng.randint(60, 3600 * 3)
+                    order_ts = candle.timestamp + timedelta(seconds=offset_seconds)
+                    side = (
+                        OrderSide.BUY
+                        if self.rng.random() < buy_probability
+                        else OrderSide.SELL
+                    )
+                    raw_vol = self.rng.uniform(min_volume, max_volume)
+                    volume = round(raw_vol / 50.0) * 50.0
 
-                side = (
-                    OrderSide.BUY
-                    if self.rng.random() < buy_probability
-                    else OrderSide.SELL
-                )
-                raw_vol = self.rng.uniform(min_volume, max_volume)
-                volume = round(raw_vol / 50.0) * 50.0
+                    order = ClientOrder(
+                        order_id=f"ORD-{counter:06d}",
+                        timestamp=order_ts,
+                        side=side,
+                        volume_eur=float(volume),
+                    )
+                    order_candle_pairs.append((order, candle))
+            else:
+                num_orders = int(orders_per_candle)
+                for j in range(num_orders):
+                    counter += 1
+                    # Offset timestamp slightly within the 4-hour window
+                    offset_seconds = (j * 3600) + self.rng.randint(60, 1800)
+                    order_ts = candle.timestamp + timedelta(seconds=offset_seconds)
 
-                order = ClientOrder(
-                    order_id=f"ORD-{counter:06d}",
-                    timestamp=order_ts,
-                    side=side,
-                    volume_eur=float(volume),
-                )
-                order_candle_pairs.append((order, candle))
+                    side = (
+                        OrderSide.BUY
+                        if self.rng.random() < buy_probability
+                        else OrderSide.SELL
+                    )
+                    raw_vol = self.rng.uniform(min_volume, max_volume)
+                    volume = round(raw_vol / 50.0) * 50.0
+
+                    order = ClientOrder(
+                        order_id=f"ORD-{counter:06d}",
+                        timestamp=order_ts,
+                        side=side,
+                        volume_eur=float(volume),
+                    )
+                    order_candle_pairs.append((order, candle))
 
         return order_candle_pairs
 
@@ -140,7 +164,7 @@ class SimulationRunner:
     def run_historical(
         self,
         candles: List[MarketCandle],
-        orders_per_candle: int = 1,
+        orders_per_candle: Union[int, float] = 1,
         min_volume: float = 500.0,
         max_volume: float = 4000.0,
         buy_probability: float = 0.50,
@@ -149,10 +173,11 @@ class SimulationRunner:
     ) -> Dict[str, Any]:
         """
         Execute simulation over real historical candles with dynamic market pricing.
+        Supports dense order streams as well as sparse, low-frequency flows.
 
         Args:
             candles: Chronological sequence of real market candles.
-            orders_per_candle: Number of client orders generated per candle.
+            orders_per_candle: Number of client orders generated per candle (or arrival probability if < 1.0).
             min_volume: Minimum EUR client trade volume.
             max_volume: Maximum EUR client trade volume.
             buy_probability: Probability of client BUY order.
@@ -171,24 +196,41 @@ class SimulationRunner:
             buy_probability=buy_probability,
         )
 
+        orders_by_candle: Dict[datetime, List[ClientOrder]] = {}
         for order, candle in pairs:
-            exec_rep, hedge = self.engine.process_order(
-                order=order,
-                current_market_rate=candle.mid_price,
-            )
-            if verbose:
-                print(
-                    f"[{order.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {exec_rep.order_id} | "
-                    f"Market: {candle.mid_price:.4f} | Client {exec_rep.side.value:<4} "
-                    f"{exec_rep.volume_eur:9.2f} EUR @ {exec_rep.client_rate:.4f} | "
-                    f"NOP: {exec_rep.nop_after_eur:10.2f} EUR"
+            orders_by_candle.setdefault(candle.timestamp, []).append(order)
+
+        for candle in candles:
+            candle_orders = orders_by_candle.get(candle.timestamp, [])
+            if candle_orders:
+                for order in candle_orders:
+                    exec_rep, hedge = self.engine.process_order(
+                        order=order,
+                        current_market_rate=candle.mid_price,
+                    )
+                    if verbose:
+                        print(
+                            f"[{order.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {exec_rep.order_id} | "
+                            f"Market: {candle.mid_price:.4f} | Client {exec_rep.side.value:<4} "
+                            f"{exec_rep.volume_eur:9.2f} EUR @ {exec_rep.client_rate:.4f} | "
+                            f"NOP: {exec_rep.nop_after_eur:10.2f} EUR"
+                        )
+                    if hedge and verbose:
+                        print(
+                            f"  >>> HEDGE ({hedge.hedge_type}): {hedge.hedge_id} | Market {hedge.side.value:<4} "
+                            f"{hedge.volume_eur:9.2f} EUR @ {hedge.hedge_rate:.4f} (Mid) | "
+                            f"NOP reset to {hedge.nop_after_eur:.2f} EUR"
+                        )
+            else:
+                tick_hedge = self.engine.evaluate_market_tick(
+                    timestamp=candle.timestamp,
+                    market_rate=candle.mid_price,
                 )
-            if hedge:
-                if verbose:
+                if tick_hedge and verbose:
                     print(
-                        f"  >>> HEDGE: {hedge.hedge_id} | Market {hedge.side.value:<4} "
-                        f"{hedge.volume_eur:9.2f} EUR @ {hedge.hedge_rate:.4f} (Mid) | "
-                        f"NOP reset to {hedge.nop_after_eur:.2f} EUR"
+                        f"  >>> TICK HEDGE ({tick_hedge.hedge_type}): {tick_hedge.hedge_id} | Market {tick_hedge.side.value:<4} "
+                        f"{tick_hedge.volume_eur:9.2f} EUR @ {tick_hedge.hedge_rate:.4f} (Mid) | "
+                        f"NOP reset to {tick_hedge.nop_after_eur:.2f} EUR"
                     )
 
         summary = self.engine.get_summary()

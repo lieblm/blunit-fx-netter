@@ -91,10 +91,15 @@ Dashboard nabízí:
 - **Risk Cockpit & Semafor řízení rizik:** Třízónové řízení expozice (Zelená / Žlutá / Červená zóna) dle Basel III standardů.
 - **Kvantitativní metriky tržního rizika:** Denní Value at Risk (VaR 95 % a VaR 99 %) a 10letý stresový test (max historický šok).
 - **Oportunistický hedging (Tržní časování):** Inteligentní odbourávání inventáře v Zóně 2 při dosažení příznivého tržního kurzu (lokální cenové extrémy) před zásahem havarijního limitu.
+- **Nízkofrekvenční režim toku (Sparse Flow):** Přepínač mezi vysokofrekvenčním tokem a reálným firemním provozem s řídkými příchody obchodů (např. 1 obchod za 2–5 dní).
+- **Časové pojistky (Position Aging & Time-Stop):** Ochrana proti stárnutí pozice a kumulaci tržního driftu (automatické vyrovnání NOP po uplynutí nastaveného limitu hodin).
+- **Dynamický Time-Decay:** Postupný útlum oportunistického prahu a $k$-parametru v čase pro hladší likvidaci inventáře.
+- **Páteční zploštění (Weekend Flattening):** Automatická redukce pozice v pátek v 16:00 UTC pro eliminaci víkendového gap risku a swapových nákladů.
+- **Dělení velkých objednávek (Block Order Split):** Okamžité částečné zajištění nadlimitních klientských tiketů na mezibankovním trhu.
 - **Cenové vychylování (Inventory Skewing):** Algoritmické posouvání klientských kurzů podle stavu sběrného účtu pro přirozený rebalancing.
 - **Částečný hedging:** Možnost volby mezi kompletním vynulováním (0 EUR) a částečným dorovnáním (50 % limitu) pro zachování nettingové kapacity.
-- Okamžitý přepočet KPI (obrat, míra internalizace, čistý MtM zisk, počet hedgů).
-- Interaktivní grafy kumulativního zisku a křivky NOP s vyznačenými zónami a rozlišením oportunistických vs. havarijních zásahů.
+- Okamžitý přepočet KPI (obrat, míra internalizace, čistý MtM zisk, detailní rozpad hedgů podle typů).
+- Interaktivní grafy kumulativního zisku a křivky NOP s vyznačenými zónami a rozlišením oportunistických, časových (Time-Stop), víkendových a havarijních zásahů.
 - Filtrovatelný ledger transakcí a tlačítko pro stažení výsledného CSV.
 
 ---
@@ -134,6 +139,11 @@ python3 main.py --start-date 2024-01-01 --end-date 2024-01-31 --print-csv --csv-
 | `--opportunistic-threshold` | `17500.0` | Prahová hodnota NOP v EUR pro aktivaci oportunistického časování |
 | `--timing-window` | `20` | Klouzavé okno tržních kotací pro výpočet časovacího indikátoru |
 | `--timing-k` | `0.75` | Násobek směrodatné odchylky pro potvrzení cenového extrému |
+| `--max-holding-hours` | `None` (vypnuto) | Maximální počet hodin držení otevřené pozice před spuštěním Time-Stop hedge |
+| `--time-decay` | `False` | Aktivuje postupný útlum oportunistického prahu a citlivosti $k$ v čase |
+| `--weekend-flatten` | `False` | Aktivuje zploštění pozice v pátek v 16:00 UTC před víkendem |
+| `--weekend-flatten-threshold` | `5000.0` | Maximální povolený NOP v EUR přes víkend |
+| `--large-order-threshold` | `None` | Objemový práh v EUR pro okamžité rozdělení velkého pokynu (Block Split) |
 | `--export-csv` | `fxdata/simulation_results.csv` | Cesta pro uložení kompletního CSV výstupu |
 | `--print-csv` | `False` | Vypíše CSV výstup přímo do konzole |
 | `--csv-limit` | `None` (vše) | Maximální počet řádků vypsaných do konzole při `--print-csv` |
